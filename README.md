@@ -5,7 +5,7 @@ don't have a dedicated supply chain function.
 
 **No account. No server. No cost. One HTML file.**
 
-[→ Launch the app][(https://[your-username].github.io/chainview/)](https://ttonsmeire-wq.github.io/chainview/)
+[→ Launch the app][(https://ttonsmeire-wq.github.io/chainview/)]
 
 ## Features
 - Visual flow graph with tier-based layout
