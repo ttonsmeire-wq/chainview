@@ -1,7 +1,7 @@
 # ChainView — Supply Chain Mapper
 
 A free, self-contained supply chain mapping tool for companies that 
-don't have a dedicated supply chain function.
+want to visualize their supply chain.
 
 **No account. No server. No cost. One HTML file.**
 
