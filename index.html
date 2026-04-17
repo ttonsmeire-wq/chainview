@@ -1,0 +1,3562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ChainView — Supply Chain Mapper</title>
+<!--
+  ════════════════════════════════════════════════════════════════
+  ChainView v1.7 — Supply Chain Mapping Application
+  ════════════════════════════════════════════════════════════════
+
+  MIT License
+
+  Copyright (c) 2025 Thomas Tonsmeire
+
+  Permission is hereby granted, free of charge, to any person
+  obtaining a copy of this software and associated documentation
+  files (the "Software"), to deal in the Software without
+  restriction, including without limitation the rights to use,
+  copy, modify, merge, publish, distribute, sublicense, and/or
+  sell copies of the Software, and to permit persons to whom the
+  Software is furnished to do so, subject to the following
+  conditions:
+
+  The above copyright notice and this permission notice shall be
+  included in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+  OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+  HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+  OTHER DEALINGS IN THE SOFTWARE.
+
+  ════════════════════════════════════════════════════════════════
+  CREDITS
+  ════════════════════════════════════════════════════════════════
+
+  Developer:       Thomas Tonsmeire
+  AI Assistance:   Claude (Anthropic) — https://anthropic.com
+  Purpose:         Free supply chain mapping for smaller companies
+                   that lack a dedicated supply chain function.
+
+  Third-party libraries (all open source):
+    D3.js v7.8.5          — BSD 3-Clause — https://d3js.org
+    Leaflet.js v1.9.4     — BSD 2-Clause — https://leafletjs.com
+    XLSX.js v0.18.5       — Apache 2.0   — https://sheetjs.com
+    OpenStreetMap/Nominatim — ODbL       — https://openstreetmap.org
+    DM Sans / DM Mono     — OFL 1.1      — fonts.google.com
+
+  ════════════════════════════════════════════════════════════════
+  CHANGELOG
+  ════════════════════════════════════════════════════════════════
+
+  v1.7  - AI analysis brief export (.txt) for use with any AI tool
+  v1.63 - Code audit: dead code removed, opStatusColor consolidated
+  v1.62 - Info "Operations" renamed "Logistics"; link-to-op assignment
+  v1.61 - Operations sub-components per node with status flags
+  v1.6  - State/province field, tier node counts, CSV city/state/country
+  v1.5  - Customisable tiers: rename, reorder, add/remove, colour
+  v1.4  - Full audit: D3 link normalisation, bug fixes, sheet tag import
+  v1.3  - Geo view legend, tag filter panel, taller map container
+  v1.2  - Geographic map view with Leaflet + OpenStreetMap
+  v1.1  - SVG map export and CSV data export
+  v1.0  - Initial release
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:        #0f1117;
+    --surface:   #181c27;
+    --surface2:  #1e2334;
+    --border:    #2a3045;
+    --border2:   #3a4560;
+    --text:      #e8ecf4;
+    --muted:     #7a85a0;
+    --accent:    #4f8ef7;
+
+    --tier0: #4f8ef7;  /* Raw Materials */
+    --tier1: #7c5cfc;  /* Suppliers */
+    --tier2: #26c0a0;  /* Manufacturing */
+    --tier3: #f59e0b;  /* Distribution */
+    --tier4: #ef4444;  /* Retail/End */
+    --tier5: #ec4899;  /* Other */
+
+    --risk-low:    #26c0a0;
+    --risk-medium: #f59e0b;
+    --risk-high:   #ef4444;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── TOPBAR ── */
+  #topbar {
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    gap: 10px;
+    flex-shrink: 0;
+    z-index: 100;
+    position: relative;
+    overflow: hidden;
+  }
+  #logo {
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: .04em;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #logo svg { color: var(--accent); }
+  .topbar-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+  #project-name {
+    font-size: 13px;
+    font-family: 'DM Mono', monospace;
+    min-width: 120px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    outline: none;
+    cursor: text;
+  }
+  #project-name:focus { color: var(--text); }
+
+  .tb-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .tb-btn:hover { border-color: var(--border2); color: var(--text); background: var(--surface2); }
+  .tb-btn.primary { border-color: var(--accent); color: var(--accent); }
+  .tb-btn.primary:hover { background: rgba(79,142,247,.12); }
+
+  #search-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px 6px 30px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: 'DM Sans', sans-serif;
+    width: 140px;
+    max-width: 140px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  #search-box:focus { border-color: var(--accent); }
+  .search-wrap { position: relative; flex-shrink: 1; min-width: 0; overflow: hidden; }
+  .search-wrap svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+
+  /* ── LAYOUT ── */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── CANVAS ── */
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(79,142,247,.04) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(124,92,252,.04) 0%, transparent 50%);
+  }
+  #canvas-wrap svg { width: 100%; height: 100%; }
+
+  /* dot grid */
+  #canvas-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+    background-size: 28px 28px;
+    opacity: .5;
+    pointer-events: none;
+  }
+
+  /* zoom controls */
+  #zoom-controls {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .zoom-btn {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .zoom-btn:hover { border-color: var(--border2); color: var(--text); }
+
+  /* legend */
+  #legend {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 11px;
+  }
+  #legend .leg-title { color: var(--muted); font-weight: 500; margin-bottom: 8px; letter-spacing: .06em; text-transform: uppercase; }
+  .leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; color: var(--muted); }
+  .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* stats bar */
+  #stats-bar {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 11px;
+  }
+  .stat-pill {
+    padding: 6px 14px;
+    display: flex; align-items: center; gap: 6px;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .stat-pill:last-child { border-right: none; }
+  .stat-pill strong { color: var(--text); font-size: 13px; font-weight: 600; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: 320px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width .25s ease;
+  }
+  #sidebar.collapsed { width: 0; }
+
+  .sidebar-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .sidebar-title { font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  .sidebar-close {
+    width: 24px; height: 24px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    transition: all .15s;
+  }
+  .sidebar-close:hover { background: var(--surface2); color: var(--text); }
+
+  .sidebar-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+  .sidebar-body::-webkit-scrollbar { width: 4px; }
+  .sidebar-body::-webkit-scrollbar-track { background: transparent; }
+  .sidebar-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  /* Form */
+  .form-group { margin-bottom: 14px; }
+  .form-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 5px;
+  }
+  .form-input, .form-select, .form-textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+  .form-select { appearance: none; cursor: pointer; }
+  .form-textarea { resize: vertical; min-height: 70px; }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .risk-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .risk-low { background: rgba(38,192,160,.15); color: var(--risk-low); }
+  .risk-medium { background: rgba(245,158,11,.15); color: var(--risk-medium); }
+  .risk-high { background: rgba(239,68,68,.15); color: var(--risk-high); }
+
+  .sidebar-footer {
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .btn {
+    flex: 1;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #3a7de6; border-color: #3a7de6; }
+  .btn-ghost { background: transparent; color: var(--muted); }
+  .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+  .btn-danger { background: transparent; color: #ef4444; border-color: rgba(239,68,68,.3); }
+  .btn-danger:hover { background: rgba(239,68,68,.1); }
+
+  /* Node detail view */
+  .detail-section { margin-bottom: 18px; }
+  .detail-section-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .detail-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 4px 0; font-size: 13px; }
+  .detail-key { color: var(--muted); flex-shrink: 0; margin-right: 12px; }
+  .detail-val { color: var(--text); text-align: right; word-break: break-word; }
+
+  .cert-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border2);
+    font-size: 11px;
+    color: var(--muted);
+    margin: 2px;
+  }
+
+  .connections-list { display: flex; flex-direction: column; gap: 6px; }
+  .conn-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    background: var(--surface2);
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .conn-item:hover { border-color: var(--border2); }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    padding: 40px;
+    gap: 12px;
+  }
+  .empty-icon { font-size: 40px; opacity: .3; }
+  .empty-title { font-size: 15px; font-weight: 600; color: var(--text); }
+  .empty-sub { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  /* Tabs */
+  .tab-row {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all .15s;
+    margin-bottom: -1px;
+  }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn:hover:not(.active) { color: var(--text); }
+
+  /* ── D3 NODES ── */
+  .node-group { cursor: pointer; }
+  .node-group:hover .node-circle { filter: brightness(1.2); }
+  .node-circle { transition: r .2s; }
+  .node-label { pointer-events: none; user-select: none; }
+  .link { stroke-opacity: .5; }
+  .link:hover { stroke-opacity: 1; }
+
+  /* highlight */
+  .node-group.highlighted .node-circle { stroke-width: 3px !important; stroke: #fff !important; }
+  .node-group.dimmed { opacity: .25; }
+
+  /* modal overlay */
+  #modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.6);
+    z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  #modal-overlay.open { display: flex; }
+  #modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 480px;
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+  .modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; flex-shrink: 0; }
+
+  /* toast */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 13px;
+    color: var(--text);
+    z-index: 999;
+    transition: transform .25s ease;
+    pointer-events: none;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* scrollbar global */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  /* Export dropdown */
+  .export-wrap { position: relative; }
+  .export-menu {
+    display: none;
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    overflow: hidden;
+    min-width: 180px;
+    z-index: 600;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  .export-menu.open { display: block; }
+  /* Flow filter dropdown — also fixed */
+  #filter-dropdown {
+    position: fixed !important;
+    z-index: 600;
+  }
+  .export-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px;
+    font-size: 12px;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--muted);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+    transition: background .1s, color .1s;
+    border-bottom: 1px solid var(--border);
+  }
+  .export-item:last-child { border-bottom: none; }
+  .export-item:hover { background: var(--surface2); color: var(--text); }
+  .export-item-label { flex: 1; }
+  .export-item-ext { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--border2); }
+
+  /* link mode cursor */
+  body.link-mode { cursor: crosshair; }
+  body.link-mode .node-group { cursor: crosshair; }
+
+  /* ── TAG FILTER BAR ── */
+  #filter-bar {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    z-index: 50;
+  }
+  /* Dropdown filter row items */
+  .filter-row-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background .1s, color .1s;
+    user-select: none;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .filter-row-item:hover { background: var(--surface2); color: var(--text); }
+  .filter-row-item.active { color: var(--text); }
+  .filter-row-item input[type=checkbox] { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; flex-shrink: 0; }
+  .filter-row-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── TEMPLATE PICKER ── */
+  .template-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 4px; }
+  .template-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 14px;
+    cursor: pointer;
+    transition: all .15s;
+    background: var(--surface2);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .template-card:hover { border-color: var(--accent); background: rgba(79,142,247,.06); }
+  .template-card.selected { border-color: var(--accent); background: rgba(79,142,247,.10); }
+  .template-icon { font-size: 24px; line-height: 1; }
+  .template-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .template-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  /* ── VIEW TOGGLE ── */
+  .view-toggle {
+    display: flex;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .view-btn {
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 11px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .view-btn:first-child { border-right: 1px solid var(--border); }
+  .view-btn.active { background: var(--surface); color: var(--text); }
+  .view-btn:hover:not(.active) { color: var(--text); }
+
+  /* ── GEO VIEW ── */
+  #geo-screen {
+    display: none;
+    position: absolute;
+    top: 52px;
+    left: 0; right: 0; bottom: 0;
+    background: var(--bg);
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 24px;
+    gap: 12px;
+    overflow-y: auto;
+    z-index: 10;
+  }
+  #geo-screen.visible { display: flex; }
+
+  #geo-map-container {
+    width: 100%;
+    max-width: 1200px;
+    height: calc(100vh - 52px - 130px);
+    min-height: 400px;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+  }
+  #geo-map {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── GEO MAP OVERLAYS (float on top of map like Leaflet controls) ── */
+
+  /* Legend — bottom left */
+  #geo-legend {
+    position: absolute;
+    bottom: 28px;
+    left: 12px;
+    z-index: 500;
+    background: rgba(24,28,39,.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 11px 14px;
+    font-size: 11px;
+    backdrop-filter: blur(4px);
+    min-width: 150px;
+  }
+  #geo-legend .leg-title {
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    margin-bottom: 8px;
+    font-size: 10px;
+  }
+  #geo-legend .leg-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 5px; color: var(--muted);
+    font-size: 11px;
+  }
+  #geo-legend .leg-row:last-child { margin-bottom: 0; }
+  #geo-legend .leg-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(255,255,255,.3); }
+
+  /* Leaflet overrides */
+  .leaflet-tile { filter: brightness(0.82) saturate(0.85); }
+  .leaflet-container { background: #1a1f2e; font-family: 'DM Sans', sans-serif; }
+  .leaflet-popup-content-wrapper {
+    background: var(--surface) !important;
+    border: 1px solid var(--border2) !important;
+    border-radius: 8px !important;
+    color: var(--text) !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5) !important;
+    font-family: 'DM Sans', sans-serif !important;
+  }
+  .leaflet-popup-tip { background: var(--surface) !important; }
+  .leaflet-popup-content { margin: 12px 14px !important; font-size: 13px !important; min-width: 160px; }
+  .geo-popup-name { font-weight: 600; font-size: 14px; margin-bottom: 3px; }
+  .geo-popup-tier { font-size: 11px; margin-bottom: 8px; }
+  .geo-popup-row { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; padding: 2px 0; }
+  .geo-popup-key { color: var(--muted); }
+  .geo-popup-btn {
+    margin-top: 10px; width: 100%; padding: 6px;
+    border-radius: 5px; border: 1px solid var(--border2);
+    background: transparent; color: var(--accent);
+    font-size: 12px; font-family: 'DM Sans', sans-serif;
+    cursor: pointer; transition: background .15s;
+  }
+  .geo-popup-btn:hover { background: rgba(79,142,247,.1); }
+
+  /* Loading overlay inside map container */
+  #geo-loading {
+    position: absolute; inset: 0; z-index: 1000;
+    background: rgba(15,17,23,.8);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px; font-size: 14px; color: var(--muted);
+  }
+  #geo-loading.hidden { display: none; }
+  .geo-spinner {
+    width: 32px; height: 32px;
+    border: 2px solid var(--border2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Unresolved panel below map */
+  #geo-unresolved {
+    width: 100%;
+    max-width: 1100px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    flex-shrink: 0;
+  }
+  #geo-unresolved-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  #geo-unresolved-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .unresolved-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+    background: var(--surface2);
+  }
+  .unresolved-chip:hover { border-color: var(--accent); color: var(--text); }
+  .unresolved-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── TIER CONFIG MODAL ── */
+  .tier-config-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tier-config-row:last-child { border-bottom: none; }
+  .tier-swatch {
+    width: 22px; height: 22px; border-radius: 50%;
+    flex-shrink: 0; cursor: pointer;
+    border: 2px solid rgba(255,255,255,.15);
+    transition: transform .1s;
+  }
+  .tier-swatch:hover { transform: scale(1.12); }
+  .tier-name-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 8px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    width: 100%;
+    transition: border-color .15s;
+  }
+  .tier-name-input:focus { border-color: var(--accent); }
+  .tier-del-btn {
+    width: 26px; height: 26px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+    flex-shrink: 0;
+  }
+  .tier-del-btn:hover { border-color: rgba(239,68,68,.4); color: #ef4444; background: rgba(239,68,68,.08); }
+  .tier-del-btn:disabled { opacity: .25; cursor: not-allowed; }
+  .tier-move-btn {
+    width: 22px; height: 22px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .tier-move-btn:hover { border-color: var(--border2); color: var(--text); }
+  .tier-move-btn:disabled { opacity: .2; cursor: not-allowed; }
+  .colour-picker-row {
+    display: flex; flex-wrap: wrap; gap: 7px;
+    padding: 10px 0 4px;
+  }
+  .colour-option {
+    width: 22px; height: 22px; border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform .1s, border-color .1s;
+    flex-shrink: 0;
+  }
+  .colour-option:hover { transform: scale(1.15); }
+  .colour-option.selected { border-color: #fff; transform: scale(1.1); }
+
+  /* ── OPERATIONS ── */
+  .op-card {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 12px;
+    background: var(--surface2);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .op-card-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 4px;
+  }
+  .op-status-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .op-name { font-size: 13px; font-weight: 500; flex: 1; }
+  .op-type { font-size: 11px; color: var(--muted); }
+  .op-detail-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+  .op-detail-key { color: var(--muted); }
+  .op-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .op-btn {
+    flex: 1; padding: 4px 8px; border-radius: 5px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--muted); font-size: 11px;
+    font-family: 'DM Sans', sans-serif; cursor: pointer;
+    transition: all .15s;
+  }
+  .op-btn:hover { border-color: var(--border2); color: var(--text); background: var(--surface); }
+  .op-btn.danger { color: #ef4444; border-color: rgba(239,68,68,.3); }
+  .op-btn.danger:hover { background: rgba(239,68,68,.08); }
+
+  .op-form {
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    padding: 12px;
+    background: var(--surface2);
+    margin-bottom: 8px;
+  }
+  .op-form .form-group { margin-bottom: 10px; }
+  .op-form .form-group:last-child { margin-bottom: 0; }
+
+  /* Status badge inline */
+  .status-badge {
+    display: inline-block; padding: 1px 7px;
+    border-radius: 4px; font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .status-active   { background: rgba(38,192,160,.15);  color: #26c0a0; }
+  .status-degraded { background: rgba(245,158,11,.15);  color: #f59e0b; }
+  .status-offline  { background: rgba(239,68,68,.15);   color: #ef4444; }
+  .status-planned  { background: rgba(122,133,160,.15); color: var(--muted); }
+
+  /* ── SPREADSHEET IMPORT ── */
+  .drop-zone {
+    border: 1.5px dashed var(--border2);
+    border-radius: 10px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .15s;
+    background: var(--surface2);
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(79,142,247,.06); }
+  .drop-zone-icon { font-size: 28px; margin-bottom: 8px; }
+  .drop-zone-label { font-size: 13px; color: var(--muted); }
+  .drop-zone-label strong { color: var(--accent); cursor: pointer; }
+
+  .preview-table-wrap { overflow-x: auto; margin-top: 12px; max-height: 260px; overflow-y: auto; border-radius: 6px; border: 1px solid var(--border); }
+  .preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .preview-table th { background: var(--surface2); color: var(--muted); font-weight: 500; padding: 7px 10px; text-align: left; position: sticky; top: 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .preview-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+  .preview-table tr:last-child td { border-bottom: none; }
+  .preview-table tr.error td { color: #ef4444; }
+
+  .import-notice { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
+  .import-notice a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .import-notice a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div id="topbar">
+  <div id="logo">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/>
+      <line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/>
+    </svg>
+    ChainView
+  </div>
+  <div class="topbar-sep"></div>
+  <input id="project-name" value="Untitled Supply Chain" title="Click to rename"/>
+  <div class="topbar-sep"></div>
+
+  <button class="tb-btn" onclick="openTemplatePicker()" title="Start a new map from a template">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+    New map
+  </button>
+
+  <button class="tb-btn" onclick="uploadFile()" title="Load a saved .json file">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    Load file
+  </button>
+
+  <button class="tb-btn" onclick="downloadFile()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Save file
+  </button>
+
+  <div class="export-wrap">
+    <button class="tb-btn" onclick="toggleExportMenu(event)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      Export
+    </button>
+    <div class="export-menu" id="export-menu">
+      <button class="export-item" onclick="exportSVG()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        <span class="export-item-label">Map image</span>
+        <span class="export-item-ext">.svg</span>
+      </button>
+      <button class="export-item" onclick="exportCSV()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+        <span class="export-item-label">Node data</span>
+        <span class="export-item-ext">.csv</span>
+      </button>
+      <button class="export-item" onclick="exportAIBrief()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        <span class="export-item-label">AI analysis brief</span>
+        <span class="export-item-ext">.txt</span>
+      </button>
+    </div>
+  </div>
+
+  <button class="tb-btn" onclick="openSpreadsheetImport()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+    Import sheet
+  </button>
+
+  <div class="topbar-sep"></div>
+
+  <button class="tb-btn" onclick="openAddNode()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Add node
+  </button>
+
+  <button class="tb-btn" id="link-mode-btn" onclick="toggleLinkMode()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+    Link nodes
+  </button>
+
+  <div class="topbar-sep"></div>
+
+  <button class="tb-btn" onclick="openTierConfig()" title="Customise tier names and colours">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2"/></svg>
+    Tiers
+  </button>
+
+  <div class="view-toggle" id="view-toggle">
+    <button class="view-btn active" id="vbtn-graph" onclick="setView('graph')" title="Flow diagram view">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
+      Flow
+    </button>
+    <button class="view-btn" id="vbtn-geo" onclick="setView('geo')" title="Geographic map view">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+      Geography
+    </button>
+  </div>
+
+  <div class="search-wrap">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input id="search-box" type="text" placeholder="Search nodes…" oninput="handleSearch(this.value)"/>
+  </div>
+</div>
+
+<!-- GEO SCREEN (overlays main when active) -->
+<div id="geo-screen">
+  <div id="geo-map-container">
+    <div id="geo-map"></div>
+    <div id="geo-loading" class="hidden">
+      <div class="geo-spinner"></div>
+      <span id="geo-loading-msg">Locating nodes…</span>
+    </div>
+
+    <!-- Filter dropdown — top left of map -->
+    <div id="geo-filter-panel" style="position:absolute;top:12px;left:12px;z-index:500;display:none;">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <div style="position:relative;">
+          <button onclick="toggleGeoFilterDropdown(event)" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:rgba(24,28,39,.92);color:var(--muted);font-size:12px;font-family:'DM Sans',sans-serif;font-weight:500;cursor:pointer;backdrop-filter:blur(4px);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            <span id="geo-filter-label">Filter</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div id="geo-filter-dropdown" style="display:none;min-width:220px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;z-index:600;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden;position:fixed;">
+            <div style="padding:10px 12px 6px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);">Tier</div>
+            <div id="geo-filter-tier-options" style="padding:0 8px 8px;display:flex;flex-direction:column;gap:3px;"></div>
+            <div style="border-top:1px solid var(--border);padding:10px 12px 6px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);" id="geo-filter-tag-section-label">Tags</div>
+            <div id="geo-filter-tag-options" style="padding:0 8px 8px;display:flex;flex-direction:column;gap:3px;"></div>
+            <div style="border-top:1px solid var(--border);padding:8px 12px;">
+              <button onclick="clearAllFilters()" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;">× Clear all filters</button>
+            </div>
+          </div>
+        </div>
+        <button id="geo-arrows-btn" onclick="toggleGeoArrows()" style="display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:rgba(24,28,39,.92);color:var(--muted);font-size:12px;font-family:'DM Sans',sans-serif;font-weight:500;cursor:pointer;backdrop-filter:blur(4px);">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          <span class="geo-arrows-label">Arrows: On</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Legend — bottom left of map -->
+    <div id="geo-legend">
+      <div class="leg-title">Tiers</div>
+      <div id="geo-legend-rows"></div>
+    </div>
+  </div>
+  <div id="geo-unresolved" style="display:none;">
+    <div id="geo-unresolved-title">Nodes without a mappable location</div>
+    <div id="geo-unresolved-chips"></div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- CANVAS -->
+  <div id="canvas-wrap">
+    <svg id="graph-svg"></svg>
+
+    <!-- Filter dropdown -->
+    <div id="filter-bar" style="display:none;position:absolute;top:12px;left:16px;z-index:50;">
+      <div style="position:relative;">
+        <button class="tb-btn" id="filter-dropdown-btn" onclick="toggleFilterDropdown(event)" style="background:var(--surface);gap:8px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span id="filter-bar-label">Filter</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="filter-dropdown" style="display:none;min-width:220px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);overflow:hidden;">
+          <div style="padding:10px 12px 6px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);">Tier</div>
+          <div id="filter-tier-options" style="padding:0 8px 8px;display:flex;flex-direction:column;gap:3px;"></div>
+          <div style="border-top:1px solid var(--border);padding:10px 12px 6px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);" id="filter-tag-section-label">Tags</div>
+          <div id="filter-tag-options" style="padding:0 8px 8px;display:flex;flex-direction:column;gap:3px;"></div>
+          <div style="border-top:1px solid var(--border);padding:8px 12px;">
+            <button onclick="clearAllFilters()" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;">× Clear all filters</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div id="stats-bar">
+      <div class="stat-pill"><strong id="stat-nodes">0</strong> nodes</div>
+      <div class="stat-pill"><strong id="stat-links">0</strong> links</div>
+      <div class="stat-pill"><strong id="stat-tiers">0</strong> tiers</div>
+    </div>
+
+    <!-- Zoom -->
+    <div id="zoom-controls">
+      <button class="zoom-btn" onclick="zoomBy(1.3)" title="Zoom in">+</button>
+      <button class="zoom-btn" onclick="zoomBy(0.77)" title="Zoom out">−</button>
+      <button class="zoom-btn" onclick="zoomReset()" title="Fit to screen" style="font-size:11px;">⊡</button>
+    </div>
+
+    <!-- Legend -->
+    <div id="legend">
+      <div class="leg-title">Tiers</div>
+      <div id="legend-rows"></div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--border2);font-family:'DM Mono',monospace;letter-spacing:.04em">v1.7 · built with Claude</div>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="sidebar-content">
+      <!-- Populated dynamically -->
+    </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT NODE MODAL -->
+<div id="modal-overlay" onclick="if(event.target===this)closeAnyModal()">
+
+<!-- TEMPLATE PICKER MODAL -->
+<div id="template-modal" style="display:none">
+  <div id="modal" style="width:560px">
+    <div class="modal-header">
+      <span class="modal-title">New map — choose a template</span>
+      <button class="sidebar-close" onclick="closeTemplateModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="template-grid">
+        <div class="template-card" id="tpl-blank" onclick="selectTemplate('blank')">
+          <div class="template-icon">◻</div>
+          <div class="template-name">Blank canvas</div>
+          <div class="template-desc">Start completely from scratch with no nodes.</div>
+        </div>
+        <div class="template-card" id="tpl-one" onclick="selectTemplate('one-each')">
+          <div class="template-icon">⬡</div>
+          <div class="template-name">One of each tier</div>
+          <div class="template-desc">One starter node per your current tiers, ready to connect.</div>
+        </div>
+        <div class="template-card" id="tpl-sample" onclick="selectTemplate('sample')">
+          <div class="template-icon">⬡⬡⬡</div>
+          <div class="template-name">Sample chain</div>
+          <div class="template-desc">Full manufacturing example with 13 nodes and links.</div>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-top:16px;line-height:1.6">
+        ⚠ Loading a template will replace your current map. Save your work first if needed.
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeTemplateModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="applyTemplate()">Load template</button>
+    </div>
+  </div>
+</div>
+
+<!-- SPREADSHEET IMPORT MODAL -->
+<div id="sheet-modal" style="display:none">
+  <div id="modal" style="width:620px">
+    <div class="modal-header">
+      <span class="modal-title">Import from spreadsheet</span>
+      <button class="sidebar-close" onclick="closeSheetModal()">×</button>
+    </div>
+    <div class="modal-body" id="sheet-modal-body">
+      <!-- populated by openSpreadsheetImport() -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSheetModal()">Cancel</button>
+      <button class="btn btn-primary" id="sheet-import-btn" onclick="commitSheetImport()" disabled style="opacity:.4;cursor:not-allowed">Add nodes</button>
+    </div>
+  </div>
+</div>
+
+<!-- NODE EDIT MODAL (default) -->
+<div id="node-modal">
+  <div id="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Node</span>
+      <button class="sidebar-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="modal-body">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNode()">Save node</button>
+    </div>
+  </div>
+</div>
+
+<!-- TIER CONFIG MODAL -->
+<div id="tier-modal" style="display:none">
+  <div id="modal" style="width:520px">
+    <div class="modal-header">
+      <span class="modal-title">Configure tiers</span>
+      <button class="sidebar-close" onclick="closeTierModal()">×</button>
+    </div>
+    <div class="modal-body" id="tier-modal-body" style="padding:16px 20px;">
+      <!-- populated dynamically -->
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;">
+      <button class="btn btn-ghost" onclick="addTier()" id="tier-add-btn" style="flex:0 0 auto;">+ Add tier</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="closeTierModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTierConfig()">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- Hidden file inputs -->
+<input type="file" id="file-input" accept=".json" style="display:none" onchange="handleFileLoad(event)"/>
+<input type="file" id="sheet-file-input" accept=".xlsx,.csv" style="display:none" onchange="handleSheetFile(event)"/>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  DATA MODEL
+// ═══════════════════════════════════════════════
+
+let state = {
+  nodes: [],
+  links: []
+};
+
+let editingNodeId = null;
+let selectedNodeId = null;
+let linkModeActive = false;
+let linkSourceId = null;
+
+let TIERS = [
+  { label: 'Raw Materials', color: '#4f8ef7' },
+  { label: 'Suppliers',     color: '#7c5cfc' },
+  { label: 'Manufacturing', color: '#26c0a0' },
+  { label: 'Distribution',  color: '#f59e0b' },
+  { label: 'Retail / End',  color: '#ef4444' },
+  { label: 'Other',         color: '#ec4899' },
+];
+
+function tierColor(t) {
+  if (t >= 0 && t < TIERS.length) return TIERS[t].color;
+  return TIERS[TIERS.length - 1]?.color || '#ec4899';
+}
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// ═══════════════════════════════════════════════
+//  SAMPLE DATA
+// ═══════════════════════════════════════════════
+
+function loadSample() {
+  // Restore the sample chain's own tier definitions
+  TIERS = [
+    { label: 'Raw Materials', color: '#4f8ef7' },
+    { label: 'Suppliers',     color: '#7c5cfc' },
+    { label: 'Manufacturing', color: '#26c0a0' },
+    { label: 'Distribution',  color: '#f59e0b' },
+    { label: 'Retail / End',  color: '#ef4444' },
+  ];
+
+  state = {
+    nodes: [
+      // ── Tier 0: Raw Materials ──────────────────────────────────────────────
+      { id:'n1',  name:'Serra Norte Iron Mine',    tier:0, city:'Carajás',  state:'Pará',                   country:'Brazil',        location:'Carajás, Pará, Brazil',                  contact:'Paulo Melo',     lead_time:'35 days', risk:'low',    cost:'$38/t',      certs:['ISO14001'],              tags:['Program A'],            notes:'Largest open-pit iron ore operation in the world. Stable long-term contract.' },
+      { id:'n2',  name:'Sangaredi Bauxite Mine',   tier:0, city:'Boké',     state:'Boké Region',            country:'Guinea',        location:'Boké, Boké Region, Guinea',              contact:'Amadou Diallo',  lead_time:'50 days', risk:'high',   cost:'$48/t',      certs:['ISO9001'],               tags:['Program B'],            notes:'Single-source supplier. Regional political instability creates supply risk. Contingency plan under review.' },
+
+      // ── Tier 1: Suppliers ──────────────────────────────────────────────────
+      { id:'n3',  name:'Ruhr Steel Processing',    tier:1, city:'Duisburg', state:'North Rhine-Westphalia', country:'Germany',       location:'Duisburg, North Rhine-Westphalia, Germany', contact:'Hans Bergmann', lead_time:'14 days', risk:'low',    cost:'$310/t',     certs:['ISO9001','CE','EN10025'],tags:['Program A'],            notes:'Long-term contract through 2027. Preferred vendor for structural grades.' },
+      { id:'n4',  name:'Kobe Alloy Specialist',    tier:1, city:'Kobe',     state:'Hyogo',                  country:'Japan',         location:'Kobe, Hyogo, Japan',                     contact:'Yuki Tanaka',    lead_time:'21 days', risk:'low',    cost:'$520/t',     certs:['JIS','ISO9001'],         tags:['Program B'],            notes:'Exclusive supplier of 7075-T6 aluminium alloy. No qualified alternative currently.' },
+
+      // ── Tier 2: Manufacturing ──────────────────────────────────────────────
+      { id:'n5',  name:'Monterrey Components A',   tier:2, city:'Monterrey',state:'Nuevo León',             country:'Mexico',        location:'Monterrey, Nuevo León, Mexico',           contact:'Rosa Gutiérrez', lead_time:'10 days', risk:'medium', cost:'$1,150/unit', certs:['ISO9001','IATF16949'],   tags:['Program A'],            notes:'Capacity constrained in Q3 due to line expansion. Dual-source evaluation in progress.' },
+      { id:'n6',  name:'Wrocław Components B',     tier:2, city:'Wrocław',  state:'Lower Silesian',         country:'Poland',        location:'Wrocław, Lower Silesian, Poland',         contact:'Adam Kowalski',  lead_time:'12 days', risk:'low',    cost:'$970/unit',   certs:['ISO9001','CE'],          tags:['Program B'],            notes:'Secondary manufacturing site. Consistently meets quality targets. Capacity headroom available.' },
+      { id:'n7',  name:'Detroit Assembly Plant',   tier:2, city:'Detroit',  state:'Michigan',               country:'United States', location:'Detroit, Michigan, United States',        contact:'Tom Reardon',    lead_time:'7 days',  risk:'low',    cost:'$3,200/unit', certs:['ISO9001','AS9100','IATF16949'], tags:['Program A','Program B'], notes:'Shared final assembly site for both programs. Programs run on separate production lines.', operations:[{id:'op1',name:'Program A Line',type:'Assembly Line',status:'active',contact:'Tom Reardon',cost:'$1,800/unit',notes:'Steel chassis assembly. Running at 94% capacity.'},{id:'op2',name:'Program B Line',type:'Assembly Line',status:'degraded',contact:'Tom Reardon',cost:'$1,400/unit',notes:'Aluminium body assembly. Robotics cell offline for maintenance — reduced throughput until Friday.'}] },
+
+      // ── Tier 3: Distribution ───────────────────────────────────────────────
+      { id:'n8',  name:'Memphis Distribution Hub', tier:3, city:'Memphis',  state:'Tennessee',              country:'United States', location:'Memphis, Tennessee, United States',       contact:'Lisa Nguyen',    lead_time:'2 days',  risk:'low',    cost:'$11/unit',    certs:['ISO28001'],              tags:['Program A'],            notes:'Primary North American DC. Co-located with FedEx hub — next-day domestic delivery.' },
+      { id:'n9',  name:'Rotterdam Logistics Hub',  tier:3, city:'Rotterdam',state:'South Holland',          country:'Netherlands',   location:'Rotterdam, South Holland, Netherlands',   contact:'Eva Bakker',     lead_time:'5 days',  risk:'medium', cost:'$19/unit',    certs:['ISO28001','AEO'],        tags:['Program B'],            notes:'EU entry point. Post-Brexit customs clearance adds 2–3 days for UK-bound shipments.', operations:[{id:'op3',name:'Cold Storage Zone',type:'Warehouse Zone',status:'active',contact:'Eva Bakker',cost:'$4/unit',notes:'Temperature-controlled. Full capacity.'},{id:'op4',name:'UK Customs Lane',type:'Customs Processing',status:'degraded',contact:'Eva Bakker',cost:'$3/unit',notes:'Extended processing times due to updated HMRC documentation requirements.'}] },
+
+      // ── Tier 4: Retail / End ───────────────────────────────────────────────
+      { id:'n10', name:'North America Retail',     tier:4, city:'Chicago',  state:'Illinois',               country:'United States', location:'Chicago, Illinois, United States',        contact:'Sarah Janowitz', lead_time:'1 day',   risk:'low',    cost:'',            certs:[],                        tags:['Program A'],            notes:'Top revenue account. 18-month rolling forecast provided. VMI arrangement in place.' },
+      { id:'n11', name:'European Retail Group',    tier:4, city:'Frankfurt',state:'Hesse',                  country:'Germany',       location:'Frankfurt, Hesse, Germany',               contact:'Klaus Weber',    lead_time:'2 days',  risk:'low',    cost:'',            certs:[],                        tags:['Program B'],            notes:'Covers DACH and Benelux markets. Seasonal uplift in Q4.' },
+      { id:'n12', name:'UK Retail Partner',        tier:4, city:'Birmingham',state:'West Midlands',         country:'United Kingdom',location:'Birmingham, West Midlands, United Kingdom', contact:'Chris Walsh',   lead_time:'3 days',  risk:'medium', cost:'',            certs:[],                        tags:['Program B'],            notes:'Post-Brexit import duties add ~8% to landed cost. Reviewing price adjustment.' },
+      { id:'n13', name:'Global Online Marketplace',tier:4, city:'Seattle',  state:'Washington',             country:'United States', location:'Seattle, Washington, United States',       contact:'API / EDI',      lead_time:'1 day',   risk:'low',    cost:'',            certs:[],                        tags:['Program A','Program B'], notes:'Both product lines sold here. Fastest-growing channel. Direct fulfilment from Memphis DC.' },
+    ],
+    links: [
+      // Program A flow: Iron → Steel → Components A → Assembly → Memphis → Retail / Online
+      {source:'n1', target:'n3'},
+      {source:'n3', target:'n5'},
+      {source:'n5', target:'n7'},
+      {source:'n7', target:'n8'},
+      {source:'n8', target:'n10'},
+      {source:'n8', target:'n13'},
+
+      // Program B flow: Bauxite → Alloy → Components B → Assembly → Rotterdam → EU / UK
+      {source:'n2', target:'n4'},
+      {source:'n4', target:'n6'},
+      {source:'n6', target:'n7'},
+      {source:'n7', target:'n9'},
+      {source:'n9', target:'n11'},
+      {source:'n9', target:'n12'},
+    ]
+  };
+  document.getElementById('project-name').value = 'Sample Manufacturing Chain';
+  renderGraph();
+  renderLegends();
+  rebuildFilterBar();
+  showSidebar('empty');
+  updateStats();
+  toast('Sample supply chain loaded');
+}
+
+// ═══════════════════════════════════════════════
+//  D3 GRAPH
+// ═══════════════════════════════════════════════
+
+let svg, g, simulation, zoomBehavior;
+let linkSel, nodeSel;
+
+function initGraph() {
+  svg = d3.select('#graph-svg');
+  svg.selectAll('*').remove();
+
+  const defs = svg.append('defs');
+
+  // Arrow marker
+  defs.append('marker')
+    .attr('id','arrow')
+    .attr('viewBox','0 -5 10 10')
+    .attr('refX', 22)
+    .attr('refY', 0)
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .attr('orient','auto')
+    .append('path')
+    .attr('d','M0,-5L10,0L0,5')
+    .attr('fill','#3a4560');
+
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.1, 4])
+    .on('zoom', e => g.attr('transform', e.transform));
+
+  svg.call(zoomBehavior);
+  g = svg.append('g');
+}
+
+function renderGraph() {
+  if (!svg) initGraph();
+
+  const width  = document.getElementById('canvas-wrap').clientWidth;
+  const height = document.getElementById('canvas-wrap').clientHeight;
+
+  // Normalise links: after D3 simulation runs, source/target become objects.
+  // Always work from plain IDs so renderGraph is safe to call multiple times.
+  // Preserve op_id if present.
+  state.links = state.links.map(l => ({
+    source: typeof l.source === 'object' ? l.source.id : l.source,
+    target: typeof l.target === 'object' ? l.target.id : l.target,
+    ...(l.op_id ? { op_id: l.op_id } : {}),
+  }));
+
+  // Build lookup
+  const nodeMap = {};
+  state.nodes.forEach(n => nodeMap[n.id] = n);
+
+  // Resolve links for simulation (filter out any with missing endpoints)
+  const links = state.links
+    .filter(l => nodeMap[l.source] && nodeMap[l.target])
+    .map(l => ({ source: l.source, target: l.target, op_id: l.op_id || '' }));
+
+  // Stop existing sim
+  if (simulation) simulation.stop();
+
+  simulation = d3.forceSimulation(state.nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(130).strength(0.6))
+    .force('charge', d3.forceManyBody().strength(-400))
+    .force('x', d3.forceX(d => {
+      const tiers = TIERS.length;
+      return (d.tier / (tiers - 1)) * (width - 200) + 100;
+    }).strength(0.35))
+    .force('y', d3.forceY(height / 2).strength(0.08))
+    .force('collide', d3.forceCollide(42));
+
+  // Draw links
+  g.selectAll('.link').remove();
+  g.selectAll('.link-label').remove();
+
+  linkSel = g.selectAll('.link')
+    .data(links)
+    .join('line')
+    .attr('class','link')
+    .attr('stroke','#2a3045')
+    .attr('stroke-width', 1.5)
+    .attr('marker-end','url(#arrow)');
+
+  // Op labels on links that have an op assigned
+  const labeledLinks = links.filter(l => l.op_id);
+  const linkLabelSel = g.selectAll('.link-label')
+    .data(labeledLinks)
+    .join('text')
+    .attr('class','link-label')
+    .attr('text-anchor','middle')
+    .attr('font-size','9px')
+    .attr('font-family','DM Sans, sans-serif')
+    .attr('fill','#7a85a0')
+    .attr('pointer-events','none')
+    .attr('dy','-4')
+    .text(d => {
+      // Resolve op name from source node's operations
+      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      const srcNode = nodeMap[srcId];
+      const op = (srcNode?.operations || []).find(o => o.id === d.op_id);
+      return op ? op.name : '';
+    });
+
+  // Draw nodes
+  g.selectAll('.node-group').remove();
+  nodeSel = g.selectAll('.node-group')
+    .data(state.nodes, d => d.id)
+    .join('g')
+    .attr('class','node-group')
+    .attr('id', d => 'node-' + d.id)
+    .call(d3.drag()
+      .on('start', dragstart)
+      .on('drag',  dragged)
+      .on('end',   dragend))
+    .on('click', nodeClicked);
+
+  nodeSel.append('circle')
+    .attr('class','node-circle')
+    .attr('r', 20)
+    .attr('fill', d => tierColor(d.tier))
+    .attr('fill-opacity', 0.18)
+    .attr('stroke', d => tierColor(d.tier))
+    .attr('stroke-width', 1.5);
+
+  // Inner dot
+  nodeSel.append('circle')
+    .attr('r', 6)
+    .attr('fill', d => tierColor(d.tier))
+    .attr('opacity', 0.9);
+
+  // Risk ring
+  nodeSel.filter(d => d.risk === 'high').append('circle')
+    .attr('r', 24)
+    .attr('fill','none')
+    .attr('stroke','#ef4444')
+    .attr('stroke-width', 1)
+    .attr('stroke-dasharray','4 3')
+    .attr('opacity', 0.6);
+
+  nodeSel.filter(d => d.risk === 'medium').append('circle')
+    .attr('r', 24)
+    .attr('fill','none')
+    .attr('stroke','#f59e0b')
+    .attr('stroke-width', 1)
+    .attr('stroke-dasharray','4 3')
+    .attr('opacity', 0.5);
+
+  // Operations status indicator — small dot top-right when any op is non-active
+  nodeSel.each(function(d) {
+    const ops = d.operations || [];
+    const worst = ops.find(o => o.status === 'offline') ? 'offline'
+                : ops.find(o => o.status === 'degraded') ? 'degraded'
+                : ops.find(o => o.status === 'planned') ? 'planned'
+                : null;
+    if (!worst) return;
+    const color = opStatusColor(worst);
+    d3.select(this).append('circle')
+      .attr('r', 5)
+      .attr('cx', 14)
+      .attr('cy', -14)
+      .attr('fill', color)
+      .attr('stroke', 'var(--bg)')
+      .attr('stroke-width', 1.5);
+  });
+
+  // Labels
+  nodeSel.append('text')
+    .attr('class','node-label')
+    .attr('y', 33)
+    .attr('text-anchor','middle')
+    .attr('font-size','11px')
+    .attr('font-family','DM Sans, sans-serif')
+    .attr('font-weight','500')
+    .attr('fill','#e8ecf4')
+    .text(d => d.name.length > 18 ? d.name.slice(0,17) + '…' : d.name);
+
+  // Tier badge
+  nodeSel.append('text')
+    .attr('class','node-label')
+    .attr('y', 43)
+    .attr('text-anchor','middle')
+    .attr('font-size','9px')
+    .attr('font-family','DM Mono, monospace')
+    .attr('fill','#7a85a0')
+    .text(d => (TIERS[d.tier] || TIERS[TIERS.length-1]).label);
+
+  simulation.on('tick', () => {
+    linkSel
+      .attr('x1', d => d.source.x)
+      .attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x)
+      .attr('y2', d => d.target.y);
+
+    linkLabelSel
+      .attr('x', d => (d.source.x + d.target.x) / 2)
+      .attr('y', d => (d.source.y + d.target.y) / 2);
+
+    nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  // Re-apply any active tag filters after render
+  setTimeout(() => applyTagFilter(), 50);
+
+  updateStats();
+}
+
+function dragstart(event, d) {
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function dragged(event, d) {
+  d.fx = event.x; d.fy = event.y;
+}
+function dragend(event, d) {
+  if (!event.active) simulation.alphaTarget(0);
+  d.fx = null; d.fy = null;
+}
+
+function nodeClicked(event, d) {
+  event.stopPropagation();
+
+  if (linkModeActive) {
+    handleLinkModeClick(d.id);
+    return;
+  }
+
+  selectedNodeId = d.id;
+  highlightNode(d.id);
+  showSidebar('detail', d.id);
+}
+
+function highlightNode(id) {
+  d3.selectAll('.node-group')
+    .classed('highlighted', n => n.id === id)
+    .classed('dimmed', false);
+}
+
+function clearHighlight() {
+  d3.selectAll('.node-group').classed('highlighted', false).classed('dimmed', false);
+}
+
+// ═══════════════════════════════════════════════
+//  LINK MODE
+// ═══════════════════════════════════════════════
+
+function toggleLinkMode() {
+  linkModeActive = !linkModeActive;
+  linkSourceId = null;
+  const btn = document.getElementById('link-mode-btn');
+  if (linkModeActive) {
+    btn.style.borderColor = 'var(--accent)';
+    btn.style.color = 'var(--accent)';
+    document.body.classList.add('link-mode');
+    toast('Link mode: click a source node, then a target node');
+  } else {
+    btn.style.borderColor = '';
+    btn.style.color = '';
+    document.body.classList.remove('link-mode');
+    clearHighlight();
+  }
+}
+
+function handleLinkModeClick(id) {
+  if (!linkSourceId) {
+    linkSourceId = id;
+    d3.selectAll('.node-group').classed('dimmed', n => n.id !== id);
+    d3.select('#node-' + id).classed('highlighted', true);
+    toast('Source selected — now click the target node');
+  } else {
+    if (linkSourceId === id) { toast('Cannot link a node to itself'); return; }
+    const exists = state.links.some(l => {
+      const src = typeof l.source === 'object' ? l.source.id : l.source;
+      const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+      return (src === linkSourceId && tgt === id) || (src === id && tgt === linkSourceId);
+    });
+    if (exists) { toast('Link already exists'); linkSourceId = null; clearHighlight(); return; }
+    state.links.push({ source: linkSourceId, target: id });
+    toast('Link created');
+    linkSourceId = null;
+    toggleLinkMode();
+    renderGraph();
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  ZOOM
+// ═══════════════════════════════════════════════
+
+function zoomBy(factor) {
+  svg.transition().duration(300).call(zoomBehavior.scaleBy, factor);
+}
+
+function zoomReset() {
+  const w = document.getElementById('canvas-wrap').clientWidth;
+  const h = document.getElementById('canvas-wrap').clientHeight;
+  svg.transition().duration(400).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(w/2, h/2).scale(0.8).translate(-w/2, -h/2)
+  );
+}
+
+// ═══════════════════════════════════════════════
+//  SEARCH
+// ═══════════════════════════════════════════════
+
+function handleSearch(q) {
+  if (!q) { clearHighlight(); return; }
+  const lower = q.toLowerCase();
+  d3.selectAll('.node-group')
+    .classed('highlighted', d => d.name.toLowerCase().includes(lower) || (d.location||'').toLowerCase().includes(lower))
+    .classed('dimmed', d => !d.name.toLowerCase().includes(lower) && !(d.location||'').toLowerCase().includes(lower));
+}
+
+// ═══════════════════════════════════════════════
+//  SIDEBAR
+// ═══════════════════════════════════════════════
+
+function showSidebar(mode, nodeId) {
+  const sc = document.getElementById('sidebar-content');
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.remove('collapsed');
+
+  if (mode === 'empty') {
+    sc.innerHTML = `
+      <div class="empty-state" style="height:100vh">
+        <div class="empty-icon">⬡</div>
+        <div class="empty-title">No node selected</div>
+        <div class="empty-sub">Click any node on the map to inspect it, or use "Add node" to get started.</div>
+      </div>`;
+    return;
+  }
+
+  const node = state.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+
+  // Connections — resolve safely regardless of D3 mutation state
+  const connectedIds = state.links
+    .map(l => ({
+      src: typeof l.source === 'object' ? l.source.id : l.source,
+      tgt: typeof l.target === 'object' ? l.target.id : l.target,
+    }))
+    .filter(l => l.src === nodeId || l.tgt === nodeId)
+    .map(l => l.src === nodeId ? l.tgt : l.src);
+  const connected = connectedIds.map(id => state.nodes.find(n => n.id === id)).filter(Boolean);
+
+  const riskClass = { low: 'risk-low', medium: 'risk-medium', high: 'risk-high' }[node.risk] || 'risk-low';
+
+  sc.innerHTML = `
+    <div class="sidebar-header">
+      <span class="sidebar-title" style="color:${tierColor(node.tier)}">${escHtml(node.name)}</span>
+      <button class="sidebar-close" onclick="closeSidebar()">×</button>
+    </div>
+    <div class="tab-row">
+      <button class="tab-btn active" id="tab-info" onclick="switchTab('info','${nodeId}')">Info</button>
+      <button class="tab-btn" id="tab-ops"  onclick="switchTab('ops','${nodeId}')">Ops (${(node.operations||[]).length})</button>
+      <button class="tab-btn" id="tab-conn" onclick="switchTab('conn','${nodeId}')">Links (${connected.length})</button>
+    </div>
+    <div class="sidebar-body" id="tab-panel">
+      ${renderInfoTab(node, riskClass)}
+    </div>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost btn-danger" onclick="confirmDeleteNode('${node.id}')">Delete</button>
+      <button class="btn btn-primary" onclick="openEditNode('${node.id}')">Edit node</button>
+    </div>`;
+}
+
+function renderInfoTab(node, riskClass) {
+  return `
+    <div class="detail-section">
+      <div class="detail-section-title">Overview</div>
+      <div class="detail-row"><span class="detail-key">Tier</span><span class="detail-val">${(TIERS[node.tier]||TIERS[TIERS.length-1]).label}</span></div>
+      ${node.city    ? `<div class="detail-row"><span class="detail-key">City</span><span class="detail-val">${escHtml(node.city)}</span></div>` : ''}
+      ${node.state   ? `<div class="detail-row"><span class="detail-key">State / Province</span><span class="detail-val">${escHtml(node.state)}</span></div>` : ''}
+      ${node.country ? `<div class="detail-row"><span class="detail-key">Country</span><span class="detail-val">${escHtml(node.country)}</span></div>` : (!node.city && !node.state ? `<div class="detail-row"><span class="detail-key">Location</span><span class="detail-val">${escHtml(node.location||'—')}</span></div>` : '')}
+      <div class="detail-row"><span class="detail-key">Contact</span><span class="detail-val">${escHtml(node.contact||'—')}</span></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Logistics</div>
+      <div class="detail-row"><span class="detail-key">Lead time</span><span class="detail-val">${escHtml(node.lead_time||'—')}</span></div>
+      <div class="detail-row"><span class="detail-key">Cost</span><span class="detail-val">${escHtml(node.cost||'—')}</span></div>
+      <div class="detail-row"><span class="detail-key">Risk level</span><span class="detail-val"><span class="risk-badge ${riskClass}">${node.risk||'—'}</span></span></div>
+    </div>
+    ${node.certs && node.certs.length ? `
+    <div class="detail-section">
+      <div class="detail-section-title">Certifications</div>
+      <div>${node.certs.map(c=>`<span class="cert-chip">${escHtml(c)}</span>`).join('')}</div>
+    </div>` : ''}
+    ${node.tags && node.tags.length ? `
+    <div class="detail-section">
+      <div class="detail-section-title">Tags</div>
+      <div>${node.tags.map(t=>`<span class="cert-chip" style="border-color:var(--accent);color:var(--accent)">${escHtml(t)}</span>`).join('')}</div>
+    </div>` : ''}
+    ${node.notes ? `
+    <div class="detail-section">
+      <div class="detail-section-title">Notes</div>
+      <p style="font-size:13px;color:var(--muted);line-height:1.6">${escHtml(node.notes)}</p>
+    </div>` : ''}`;
+}
+
+function renderConnTab(nodeId) {
+  // Get full link objects involving this node (normalised IDs)
+  const myLinks = state.links
+    .map(l => ({
+      src: typeof l.source === 'object' ? l.source.id : l.source,
+      tgt: typeof l.target === 'object' ? l.target.id : l.target,
+      op_id: l.op_id || '',
+    }))
+    .filter(l => l.src === nodeId || l.tgt === nodeId);
+
+  if (!myLinks.length) {
+    return `<p style="font-size:13px;color:var(--muted);margin-top:12px">No links yet. Use "Link nodes" in the toolbar to connect nodes.</p>`;
+  }
+
+  const thisNode = state.nodes.find(n => n.id === nodeId);
+  const myOps = (thisNode?.operations || []);
+
+  const items = myLinks.map(l => {
+    const otherId  = l.src === nodeId ? l.tgt : l.src;
+    const other    = state.nodes.find(n => n.id === otherId);
+    if (!other) return '';
+
+    const isSource = l.src === nodeId;
+    const direction = isSource ? '→' : '←';
+
+    // Op dropdown — only shown if this node has operations
+    const assignedOp = myOps.find(o => o.id === l.op_id);
+    const opDropdown = myOps.length > 0 ? `
+      <div style="margin-top:7px;display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:var(--muted);flex-shrink:0;">Via op:</span>
+        <select style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;color:var(--text);font-size:11px;font-family:'DM Sans',sans-serif;outline:none;cursor:pointer;"
+                onchange="setLinkOp('${nodeId}','${otherId}',this.value)">
+          <option value="">— none —</option>
+          ${myOps.map(o => {
+            return `<option value="${o.id}" ${l.op_id === o.id ? 'selected' : ''}>${o.name}</option>`;
+          }).join('')}
+        </select>
+      </div>` : '';
+
+    // Show assigned op badge if one is set
+    const opBadge = assignedOp
+      ? `<span style="font-size:10px;color:${opStatusColor(assignedOp.status)};background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;margin-left:4px;">${escHtml(assignedOp.name)}</span>`
+      : '';
+
+    return `
+      <div class="conn-item" style="flex-direction:column;align-items:stretch;cursor:default;">
+        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="selectNode('${other.id}')">
+          <div class="conn-dot" style="background:${tierColor(other.tier)}"></div>
+          <span style="font-size:11px;color:var(--muted);flex-shrink:0;">${direction}</span>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:500;">${escHtml(other.name)}${opBadge}</div>
+            <div style="font-size:11px;color:var(--muted);">${(TIERS[other.tier]||TIERS[TIERS.length-1]).label} · ${escHtml(other.location||'')}</div>
+          </div>
+          <button onclick="event.stopPropagation();removeLink('${nodeId}','${otherId}')"
+                  style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;"
+                  title="Remove link">×</button>
+        </div>
+        ${opDropdown}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="connections-list">${items}</div>
+    <button class="btn btn-ghost" style="margin-top:12px;width:100%"
+            onclick="startLinkFrom('${nodeId}')">+ Add link from this node</button>`;
+}
+
+function setLinkOp(nodeId, otherId, opId) {
+  state.links = state.links.map(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    if ((src === nodeId && tgt === otherId) || (src === otherId && tgt === nodeId)) {
+      return { ...l, op_id: opId || undefined };
+    }
+    return l;
+  });
+  // Re-render the links tab in place without full sidebar rebuild
+  const panel = document.getElementById('tab-panel');
+  if (panel) panel.innerHTML = renderConnTab(nodeId);
+  renderGraph(); // refresh link labels on graph
+}
+
+function switchTab(tab, nodeId) {
+  document.getElementById('tab-info')?.classList.toggle('active', tab==='info');
+  document.getElementById('tab-ops')?.classList.toggle('active',  tab==='ops');
+  document.getElementById('tab-conn')?.classList.toggle('active', tab==='conn');
+  const panel = document.getElementById('tab-panel');
+  if (tab === 'info') {
+    const node = state.nodes.find(n => n.id === nodeId);
+    const riskClass = { low: 'risk-low', medium: 'risk-medium', high: 'risk-high' }[node.risk] || 'risk-low';
+    panel.innerHTML = renderInfoTab(node, riskClass);
+  } else if (tab === 'ops') {
+    panel.innerHTML = renderOpsTab(nodeId);
+  } else {
+    panel.innerHTML = renderConnTab(nodeId);
+  }
+}
+
+function selectNode(id) {
+  selectedNodeId = id;
+  highlightNode(id);
+  showSidebar('detail', id);
+}
+
+function startLinkFrom(id) {
+  closeSidebar();
+  linkSourceId = id;
+  if (!linkModeActive) toggleLinkMode();
+  d3.selectAll('.node-group').classed('dimmed', n => n.id !== id);
+  d3.select('#node-' + id).classed('highlighted', true);
+  toast('Now click the target node to create a link');
+}
+
+function removeLink(aId, bId) {
+  state.links = state.links.filter(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    return !((src === aId && tgt === bId) || (src === bId && tgt === aId));
+  });
+  renderGraph();
+  showSidebar('detail', aId);
+  toast('Link removed');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.add('collapsed');
+  clearHighlight();
+  selectedNodeId = null;
+}
+
+// ═══════════════════════════════════════════════
+//  ADD / EDIT NODE MODAL
+// ═══════════════════════════════════════════════
+
+function nodeFormHTML(node) {
+  const n = node || {};
+  const tierOptions = TIERS.map((t,i) =>
+    `<option value="${i}" ${n.tier===i?'selected':''}>${t.label}</option>`
+  ).join('');
+  const riskOptions = ['low','medium','high'].map(r =>
+    `<option value="${r}" ${n.risk===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`
+  ).join('');
+
+  return `
+    <div class="form-group">
+      <label class="form-label">Node name *</label>
+      <input class="form-input" id="f-name" value="${escHtml(n.name||'')}" placeholder="e.g. Steel Mill A"/>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Tier</label>
+        <select class="form-select" id="f-tier">${tierOptions}</select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Risk level</label>
+        <select class="form-select" id="f-risk">${riskOptions}</select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">City</label>
+        <input class="form-input" id="f-city" value="${escHtml(n.city||'')}" placeholder="e.g. Detroit"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">State / Province</label>
+        <input class="form-input" id="f-state" value="${escHtml(n.state||'')}" placeholder="e.g. Michigan"/>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Country</label>
+        <input class="form-input" id="f-country" value="${escHtml(n.country||'')}" placeholder="e.g. United States"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Lead time</label>
+        <input class="form-input" id="f-lead" value="${escHtml(n.lead_time||'')}" placeholder="e.g. 14 days"/>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Contact</label>
+        <input class="form-input" id="f-contact" value="${escHtml(n.contact||'')}" placeholder="Name or email"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Cost</label>
+        <input class="form-input" id="f-cost" value="${escHtml(n.cost||'')}" placeholder="e.g. $200/unit"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Certifications <span style="color:var(--muted);font-weight:400">(comma separated)</span></label>
+      <input class="form-input" id="f-certs" value="${escHtml((n.certs||[]).join(', '))}" placeholder="e.g. ISO9001, CE"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Tags <span style="color:var(--muted);font-weight:400">(comma separated — e.g. Program A, Critical)</span></label>
+      <input class="form-input" id="f-tags" value="${escHtml((n.tags||[]).join(', '))}" placeholder="e.g. Program A, Tier 1 Priority"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <textarea class="form-textarea" id="f-notes">${escHtml(n.notes||'')}</textarea>
+    </div>`;
+}
+
+function openAddNode() {
+  editingNodeId = null;
+  document.getElementById('modal-title').textContent = 'Add Node';
+  document.getElementById('modal-body').innerHTML = nodeFormHTML(null);
+  showOnlyModal('node-modal');
+}
+
+function openEditNode(id) {
+  editingNodeId = id;
+  const node = state.nodes.find(n => n.id === id);
+  document.getElementById('modal-title').textContent = 'Edit Node';
+  document.getElementById('modal-body').innerHTML = nodeFormHTML(node);
+  showOnlyModal('node-modal');
+}
+
+function saveNode() {
+  const name = document.getElementById('f-name').value.trim();
+  if (!name) { alert('Node name is required.'); return; }
+
+  const certsRaw = document.getElementById('f-certs').value.trim();
+  const certs = certsRaw ? certsRaw.split(',').map(c => c.trim()).filter(Boolean) : [];
+
+  const tagsRaw = document.getElementById('f-tags').value.trim();
+  const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+  const city    = document.getElementById('f-city').value.trim();
+  const state   = document.getElementById('f-state').value.trim();
+  const country = document.getElementById('f-country').value.trim();
+
+  // Assemble display location: "City, State, Country" omitting blanks
+  const locationParts = [city, state, country].filter(Boolean);
+  const location = locationParts.join(', ');
+
+  const data = {
+    name,
+    tier:      parseInt(document.getElementById('f-tier').value),
+    risk:      document.getElementById('f-risk').value,
+    city, state, country, location,
+    lead_time: document.getElementById('f-lead').value.trim(),
+    contact:   document.getElementById('f-contact').value.trim(),
+    cost:      document.getElementById('f-cost').value.trim(),
+    certs,
+    tags,
+    notes:     document.getElementById('f-notes').value.trim(),
+  };
+
+  const wasEditing = editingNodeId;
+
+  if (editingNodeId) {
+    const idx = state.nodes.findIndex(n => n.id === editingNodeId);
+    state.nodes[idx] = { ...state.nodes[idx], ...data };
+    toast('Node updated');
+  } else {
+    const node = { id: uid(), x: 300 + Math.random()*200, y: 200 + Math.random()*200, ...data };
+    state.nodes.push(node);
+    toast('Node added');
+  }
+
+  closeModal();
+  renderGraph();
+  if (wasEditing) showSidebar('detail', wasEditing);
+  updateStats();
+}
+
+function confirmDeleteNode(id) {
+  if (!confirm('Delete this node and all its links?')) return;
+  state.nodes = state.nodes.filter(n => n.id !== id);
+  state.links = state.links.filter(l => l.source !== id && l.target !== id);
+  closeSidebar();
+  renderGraph();
+  updateStats();
+  toast('Node deleted');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  editingNodeId = null;
+}
+
+// ═══════════════════════════════════════════════
+//  FILE I/O
+// ═══════════════════════════════════════════════
+
+function downloadFile() {
+  const payload = {
+    meta: {
+      name: document.getElementById('project-name').value,
+      saved: new Date().toISOString(),
+      version: 1,
+      tiers: TIERS.map(t => ({ label: t.label, color: t.color })),
+    },
+    nodes: state.nodes.map(n => ({
+      id: n.id, name: n.name, tier: n.tier,
+      city: n.city||'', state: n.state||'', country: n.country||'', location: n.location||'',
+      contact: n.contact, lead_time: n.lead_time, risk: n.risk,
+      cost: n.cost, certs: n.certs, tags: n.tags || [],
+      operations: n.operations || [],
+      notes: n.notes,
+      x: Math.round(n.x), y: Math.round(n.y)
+    })),
+    links: state.links.map(l => ({
+      source: typeof l.source === 'object' ? l.source.id : l.source,
+      target: typeof l.target === 'object' ? l.target.id : l.target,
+      ...(l.op_id ? { op_id: l.op_id } : {}),
+    }))
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (document.getElementById('project-name').value || 'supply-chain') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('File saved');
+}
+
+function uploadFile() {
+  document.getElementById('file-input').click();
+}
+
+function handleFileLoad(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.nodes || !data.links) throw new Error('Invalid format');
+      state.nodes = data.nodes;
+      state.links = data.links;
+      if (data.meta && data.meta.tiers && Array.isArray(data.meta.tiers) && data.meta.tiers.length > 0) {
+        TIERS = data.meta.tiers;
+      }
+      if (data.meta && data.meta.name) {
+        document.getElementById('project-name').value = data.meta.name;
+      }
+      renderGraph();
+      renderLegends();
+      rebuildFilterBar();
+      showSidebar('empty');
+      updateStats();
+      toast('File loaded: ' + file.name);
+    } catch(err) {
+      alert('Could not load file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+// ═══════════════════════════════════════════════
+//  TEMPLATE PICKER
+// ═══════════════════════════════════════════════
+
+let selectedTemplate = null;
+
+function openTemplatePicker() {
+  selectedTemplate = null;
+  document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+  showOnlyModal('template-modal');
+}
+
+function closeTemplateModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+function selectTemplate(id) {
+  selectedTemplate = id;
+  document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+  const map = { blank: 'tpl-blank', 'one-each': 'tpl-one', sample: 'tpl-sample' };
+  document.getElementById(map[id]).classList.add('selected');
+}
+
+function applyTemplate() {
+  if (!selectedTemplate) { toast('Please select a template first'); return; }
+  if (selectedTemplate === 'blank') {
+    state = { nodes: [], links: [] };
+    document.getElementById('project-name').value = 'New Supply Chain';
+    toast('Blank canvas ready');
+  } else if (selectedTemplate === 'one-each') {
+    const cx = 500, cy = 300;
+    state = {
+      nodes: TIERS.map((t, i) => ({
+        id: 'starter-' + i,
+        name: t.label + ' Node',
+        tier: i,
+        location: '', contact: '', lead_time: '', risk: 'low',
+        cost: '', certs: [], notes: 'Starter node — click Edit to fill in details.',
+        x: cx + Math.cos((i / TIERS.length) * 2 * Math.PI) * 220,
+        y: cy + Math.sin((i / TIERS.length) * 2 * Math.PI) * 180,
+      })),
+      links: []
+    };
+    document.getElementById('project-name').value = 'New Supply Chain';
+    toast('Starter template loaded — connect nodes with "Link nodes"');
+  } else {
+    loadSample();
+    closeTemplateModal();
+    return;
+  }
+  renderGraph();
+  renderLegends();
+  closeSidebar();
+  updateStats();
+  closeTemplateModal();
+}
+
+// ═══════════════════════════════════════════════
+//  SPREADSHEET IMPORT
+// ═══════════════════════════════════════════════
+
+let sheetPreviewRows = [];
+
+const TIER_MAP = {
+  'raw materials': 0, 'raw': 0,
+  'suppliers': 1, 'supplier': 1,
+  'manufacturing': 2, 'manufacture': 2, 'factory': 2,
+  'distribution': 3, 'distribute': 3, 'warehouse': 3,
+  'retail': 4, 'retail / end': 4, 'end': 4,
+  'other': 5,
+};
+
+function openSpreadsheetImport() {
+  sheetPreviewRows = [];
+  showOnlyModal('sheet-modal');
+  document.getElementById('sheet-modal-body').innerHTML = buildDropZoneHTML();
+  setSheetImportBtn(false);
+}
+
+function buildDropZoneHTML() {
+  return `
+    <div class="drop-zone" id="drop-zone"
+         onclick="document.getElementById('sheet-file-input').click()"
+         ondragover="event.preventDefault();this.classList.add('drag-over')"
+         ondragleave="this.classList.remove('drag-over')"
+         ondrop="handleSheetDrop(event)">
+      <div class="drop-zone-icon">📊</div>
+      <div class="drop-zone-label">Drop a <strong>.xlsx or .csv</strong> file here, or <strong>click to browse</strong></div>
+    </div>
+    <p class="import-notice">
+      Your spreadsheet must have a header row. Recognised columns:
+      <strong>name</strong> (required), tier, <strong>city</strong>, <strong>state</strong>, <strong>country</strong>, contact, lead_time, risk, cost, certs, tags, notes.<br>
+      City, state, and country are combined into the location field automatically. A legacy <em>location</em> column is also accepted.<br>
+      Columns can be in any order. Extra columns are ignored. Blank rows are skipped.<br>
+      <a onclick="downloadSheetTemplate()">⬇ Download the template spreadsheet</a> to get started instantly.
+    </p>`;
+}
+
+function closeSheetModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+function setSheetImportBtn(enabled) {
+  const btn = document.getElementById('sheet-import-btn');
+  if (!btn) return;
+  btn.disabled = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.4';
+  btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+}
+
+function handleSheetDrop(event) {
+  event.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  const file = event.dataTransfer.files[0];
+  if (file) processSheetFile(file);
+}
+
+function handleSheetFile(event) {
+  const file = event.target.files[0];
+  if (file) processSheetFile(file);
+  event.target.value = '';
+}
+
+function processSheetFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!rows.length) { alert('The spreadsheet appears to be empty.'); return; }
+      parseAndPreviewSheet(rows, file.name);
+    } catch(err) {
+      alert('Could not read file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function normaliseHeader(h) {
+  return String(h).toLowerCase().trim().replace(/\s+/g,'_');
+}
+
+function parseAndPreviewSheet(rows, filename) {
+  // Normalise headers
+  const firstRow = rows[0];
+  const headerMap = {}; // normalised → original key
+  Object.keys(firstRow).forEach(k => { headerMap[normaliseHeader(k)] = k; });
+
+  sheetPreviewRows = [];
+
+  rows.forEach((row, i) => {
+    const get = col => String(row[headerMap[col]] || '').trim();
+    const name = get('name');
+    if (!name) return; // skip blank rows
+
+    const tierRaw = get('tier').trim();
+
+    // Resolution priority:
+    // 1. Match by name against current TIERS (case-insensitive)
+    // 2. Match by name against legacy TIER_MAP
+    // 3. Numeric index (clamped to current TIERS length)
+    // 4. If genuinely unrecognised name — create a new tier and add it
+    let tierNum;
+    const tierLower = tierRaw.toLowerCase();
+    const existingIdx = TIERS.findIndex(t => t.label.toLowerCase() === tierLower);
+    if (existingIdx !== -1) {
+      tierNum = existingIdx;
+    } else if (TIER_MAP[tierLower] !== undefined) {
+      tierNum = TIER_MAP[tierLower];
+    } else if (!isNaN(parseInt(tierRaw))) {
+      tierNum = Math.min(TIERS.length - 1, Math.max(0, parseInt(tierRaw)));
+    } else if (tierRaw) {
+      // Unrecognised label — create a new tier if under the max
+      if (TIERS.length < 8) {
+        const usedColors = new Set(TIERS.map(t => t.color));
+        const TIER_PALETTE = ['#4f8ef7','#7c5cfc','#26c0a0','#f59e0b','#ef4444','#ec4899','#10b981','#f97316','#06b6d4','#8b5cf6','#84cc16','#e11d48'];
+        const nextColor = TIER_PALETTE.find(c => !usedColors.has(c)) || TIER_PALETTE[TIERS.length % TIER_PALETTE.length];
+        TIERS.push({ label: tierRaw, color: nextColor });
+        tierNum = TIERS.length - 1;
+      } else {
+        tierNum = TIERS.length - 1; // Clamp to last tier if at max
+      }
+    } else {
+      tierNum = TIERS.length - 1;
+    }
+
+    const riskRaw = get('risk').toLowerCase();
+    const risk = ['low','medium','high'].includes(riskRaw) ? riskRaw : 'low';
+
+    const certsRaw = get('certs');
+    const certs = certsRaw ? certsRaw.split(/[,;]/).map(c => c.trim()).filter(Boolean) : [];
+
+    const tagsRaw = get('tags');
+    const tags = tagsRaw ? tagsRaw.split(/[,;]/).map(t => t.trim()).filter(Boolean) : [];
+
+    // Assemble location from city + state + country columns if present,
+    // otherwise fall back to legacy 'location' column for backwards compatibility
+    const city    = get('city');
+    const state_  = get('state');
+    const country = get('country');
+    const locationParts = [city, state_, country].filter(Boolean);
+    const location = locationParts.length ? locationParts.join(', ') : get('location');
+
+    sheetPreviewRows.push({
+      id: uid(),
+      name,
+      tier: tierNum,
+      city, state: state_, country, location,
+      contact:  get('contact'),
+      lead_time:get('lead_time'),
+      risk,
+      cost:     get('cost'),
+      certs,
+      tags,
+      notes:    get('notes'),
+    });
+  });
+
+  // Render preview
+  const body = document.getElementById('sheet-modal-body');
+  if (!sheetPreviewRows.length) {
+    body.innerHTML = buildDropZoneHTML() + `<p style="color:#ef4444;font-size:13px;margin-top:12px">No valid rows found. Make sure your sheet has a "name" column with values.</p>`;
+    setSheetImportBtn(false);
+    return;
+  }
+
+  const tableRows = sheetPreviewRows.map(r => `
+    <tr>
+      <td>${escHtml(r.name)}</td>
+      <td style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${tierColor(r.tier)};display:inline-block;flex-shrink:0"></span>${escHtml((TIERS[r.tier]||TIERS[TIERS.length-1]).label)}</td>
+      <td>${escHtml(r.location||'—')}</td>
+      <td>${escHtml(r.contact||'—')}</td>
+      <td><span class="risk-badge risk-${r.risk}">${r.risk}</span></td>
+      <td>${escHtml(r.cost||'—')}</td>
+    </tr>`).join('');
+
+  body.innerHTML = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">
+      Found <strong style="color:var(--text)">${sheetPreviewRows.length} node${sheetPreviewRows.length!==1?'s':''}</strong> in <em>${escHtml(filename)}</em>. Review below, then click <strong>Add nodes</strong>.
+    </p>
+    <div class="preview-table-wrap">
+      <table class="preview-table">
+        <thead><tr><th>Name</th><th>Tier</th><th>City / Country</th><th>Contact</th><th>Risk</th><th>Cost</th></tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <p class="import-notice">
+      Nodes will be <strong>added</strong> to your current map (existing nodes are kept). Links must be drawn manually after import.<br>
+      <a onclick="openSpreadsheetImport()">↩ Upload a different file</a>
+    </p>`;
+
+  setSheetImportBtn(true);
+}
+
+function commitSheetImport() {
+  if (!sheetPreviewRows.length) return;
+  sheetPreviewRows.forEach((r, i) => {
+    r.x = 100 + (i % 6) * 160 + Math.random() * 40;
+    r.y = 120 + Math.floor(i / 6) * 130 + Math.random() * 30;
+    state.nodes.push(r);
+  });
+  closeSheetModal();
+  renderGraph();
+  renderLegends();
+  rebuildFilterBar();
+  updateStats();
+  toast(`${sheetPreviewRows.length} nodes imported from spreadsheet`);
+  sheetPreviewRows = [];
+}
+
+function downloadSheetTemplate() {
+  const headers = ['name','tier','city','state','country','contact','lead_time','risk','cost','certs','tags','notes'];
+  const example = ['Steel Mill A','Manufacturing','Duisburg','North Rhine-Westphalia','Germany','Hans M.','14 days','low','$320/t','ISO9001,CE','Program A','Main steel source'];
+  const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Nodes');
+  XLSX.writeFile(wb, 'chainview-template.xlsx');
+}
+
+// ═══════════════════════════════════════════════
+//  MODAL ROUTING HELPER
+// ═══════════════════════════════════════════════
+
+function showOnlyModal(which) {
+  document.getElementById('template-modal').style.display = 'none';
+  document.getElementById('sheet-modal').style.display = 'none';
+  document.getElementById('node-modal').style.display = 'none';
+  document.getElementById('tier-modal').style.display = 'none';
+  document.getElementById(which).style.display = 'block';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeAnyModal() {
+  closeModal();
+  closeTemplateModal();
+  closeSheetModal();
+  closeTierModal();
+}
+
+// ═══════════════════════════════════════════════
+//  EXPORT — SVG & CSV
+// ═══════════════════════════════════════════════
+
+function toggleExportMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('export-menu');
+  const btn  = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  menu.style.top  = (rect.bottom + 6) + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.classList.toggle('open');
+}
+
+function exportSVG() {
+  document.getElementById('export-menu').classList.remove('open');
+
+  const sourceSVG = document.getElementById('graph-svg');
+  const clone = sourceSVG.cloneNode(true);
+
+  // Embed fonts and colors as a <style> block so the file is self-contained
+  const style = document.createElementNS('http://www.w3.org/2000/svg','style');
+  style.textContent = `
+    text { font-family: 'DM Sans', Arial, sans-serif; }
+    .node-circle { transition: none; }
+    .arr { stroke: #2a3045; stroke-width: 1.5px; fill: none; }
+    .link { stroke: #2a3045; stroke-width: 1.5px; stroke-opacity: 0.5; }
+  `;
+  clone.insertBefore(style, clone.firstChild);
+
+  // Set a solid background so it looks right when opened
+  const bg = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  bg.setAttribute('width','100%');
+  bg.setAttribute('height','100%');
+  bg.setAttribute('fill','#0f1117');
+  clone.insertBefore(bg, clone.firstChild);
+
+  // Stamp the project name and export date as a subtitle
+  const w = sourceSVG.clientWidth;
+  const h = sourceSVG.clientHeight;
+  clone.setAttribute('width', w);
+  clone.setAttribute('height', h);
+  clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+
+  const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+  label.setAttribute('x', 16);
+  label.setAttribute('y', h - 12);
+  label.setAttribute('font-size','11');
+  label.setAttribute('fill','#3a4560');
+  label.setAttribute('font-family','monospace');
+  label.textContent = `${document.getElementById('project-name').value} · ChainView v1.7 · ${new Date().toLocaleDateString()}`;
+  clone.appendChild(label);
+
+  const serializer = new XMLSerializer();
+  const svgStr = serializer.serializeToString(clone);
+  const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (document.getElementById('project-name').value || 'supply-chain') + '.svg';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Map exported as SVG');
+}
+
+function exportCSV() {
+  document.getElementById('export-menu').classList.remove('open');
+
+  const projectName = document.getElementById('project-name').value || 'Supply Chain';
+  const exportDate  = new Date().toLocaleDateString();
+
+  // Build node ID → name lookup for the connections column
+  const nameMap = {};
+  state.nodes.forEach(n => nameMap[n.id] = n.name);
+
+  // Header row
+  const headers = [
+    'Name', 'Tier', 'Tier Label', 'City', 'State / Province', 'Country', 'Location',
+    'Contact', 'Lead Time', 'Risk Level', 'Cost', 'Certifications', 'Tags', 'Notes', 'Connected To'
+  ];
+
+  // One row per node
+  const rows = state.nodes.map(n => {
+    const connectedNames = state.links
+      .filter(l => {
+        const src = typeof l.source === 'object' ? l.source.id : l.source;
+        const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+        return src === n.id || tgt === n.id;
+      })
+      .map(l => {
+        const src = typeof l.source === 'object' ? l.source.id : l.source;
+        const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+        const otherId = src === n.id ? tgt : src;
+        return nameMap[otherId] || otherId;
+      })
+      .join(' | ');
+
+    return [
+      n.name,
+      n.tier,
+      (TIERS[n.tier] || TIERS[TIERS.length-1]).label,
+      n.city       || '',
+      n.state      || '',
+      n.country    || '',
+      n.location   || '',
+      n.contact    || '',
+      n.lead_time  || '',
+      n.risk       || '',
+      n.cost       || '',
+      (n.certs || []).join(' | '),
+      (n.tags  || []).join(' | '),
+      n.notes      || '',
+      connectedNames
+    ];
+  });
+
+  // Sort rows by tier for readability
+  rows.sort((a, b) => a[1] - b[1]);
+
+  // CSV serializer — wraps values containing commas/quotes in quotes
+  function csvCell(val) {
+    const s = String(val);
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  const csvLines = [
+    `# ${projectName} — Supply Chain Data Export`,
+    `# Generated by ChainView v1.7 on ${exportDate}`,
+    `# Nodes: ${state.nodes.length}  |  Links: ${state.links.length}`,
+    '',
+    headers.map(csvCell).join(','),
+    ...rows.map(r => r.map(csvCell).join(','))
+  ];
+
+  const blob = new Blob([csvLines.join('\r\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (document.getElementById('project-name').value || 'supply-chain') + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Node data exported as CSV');
+}
+
+function exportAIBrief() {
+  document.getElementById('export-menu').classList.remove('open');
+
+  const projectName = document.getElementById('project-name').value || 'Supply Chain';
+  const exportDate  = new Date().toLocaleDateString();
+  const lines = [];
+
+  // ── Helper ──────────────────────────────────────────────
+  const hr  = (ch = '─') => ch.repeat(60);
+  const sec = title => { lines.push('', hr(), `  ${title.toUpperCase()}`, hr()); };
+
+  // Resolve link IDs safely
+  const resolvedLinks = state.links.map(l => ({
+    src:   typeof l.source === 'object' ? l.source.id : l.source,
+    tgt:   typeof l.target === 'object' ? l.target.id : l.target,
+    op_id: l.op_id || '',
+  }));
+
+  // Build node lookup
+  const nodeMap = {};
+  state.nodes.forEach(n => nodeMap[n.id] = n);
+
+  // Count nodes per tier
+  const tierCounts = {};
+  state.nodes.forEach(n => { tierCounts[n.tier] = (tierCounts[n.tier] || 0) + 1; });
+
+  // Risk counts
+  const highRisk   = state.nodes.filter(n => n.risk === 'high');
+  const medRisk    = state.nodes.filter(n => n.risk === 'medium');
+
+  // Countries
+  const countries  = [...new Set(state.nodes.map(n => n.country || '').filter(Boolean))];
+
+  // Tags
+  const allTags    = [...new Set(state.nodes.flatMap(n => n.tags || []))];
+
+  // Nodes with degraded/offline ops
+  const opsAtRisk  = state.nodes.filter(n =>
+    (n.operations || []).some(o => o.status === 'offline' || o.status === 'degraded')
+  );
+
+  // ── HEADER ─────────────────────────────────────────────
+  lines.push(
+    `SUPPLY CHAIN INTELLIGENCE BRIEF`,
+    `Project: ${projectName}`,
+    `Generated by ChainView v1.7 on ${exportDate}`,
+    ``,
+    `This document contains a complete structured export of a supply chain map,`,
+    `formatted for AI analysis. Paste this entire document into an AI assistant`,
+    `(Claude, ChatGPT, Gemini, or similar) and use the suggested prompt at the end.`
+  );
+
+  // ── SECTION 1: EXECUTIVE SUMMARY ───────────────────────
+  sec('Section 1 — Executive Summary');
+  lines.push(
+    `Total nodes:    ${state.nodes.length}`,
+    `Total links:    ${resolvedLinks.length}`,
+    `Tiers defined:  ${TIERS.length} (${TIERS.map(t => t.label).join(', ')})`,
+    `Countries:      ${countries.length} (${countries.join(', ')})`,
+    `Tags / Programs:${allTags.length > 0 ? ' ' + allTags.join(', ') : ' None defined'}`,
+    ``,
+    `Risk distribution:`,
+    `  High risk nodes:   ${highRisk.length} — ${highRisk.map(n => n.name).join(', ') || 'None'}`,
+    `  Medium risk nodes: ${medRisk.length} — ${medRisk.map(n => n.name).join(', ') || 'None'}`,
+    `  Low risk nodes:    ${state.nodes.filter(n => n.risk === 'low').length}`,
+    ``,
+    `Nodes with degraded or offline operations: ${opsAtRisk.length}${opsAtRisk.length ? ' — ' + opsAtRisk.map(n => n.name).join(', ') : ''}`
+  );
+
+  // Bottleneck detection — nodes with 3+ links
+  const linkCountById = {};
+  resolvedLinks.forEach(l => {
+    linkCountById[l.src] = (linkCountById[l.src] || 0) + 1;
+    linkCountById[l.tgt] = (linkCountById[l.tgt] || 0) + 1;
+  });
+  const bottlenecks = state.nodes.filter(n => (linkCountById[n.id] || 0) >= 3);
+  if (bottlenecks.length) {
+    lines.push(``, `Potential bottlenecks (3+ connections): ${bottlenecks.map(n => `${n.name} (${linkCountById[n.id]} links)`).join(', ')}`);
+  }
+
+  // Single-source detection — nodes with only one upstream supplier
+  const inboundCount = {};
+  resolvedLinks.forEach(l => { inboundCount[l.tgt] = (inboundCount[l.tgt] || 0) + 1; });
+  const singleSource = state.nodes.filter(n => (inboundCount[n.id] || 0) === 1 && n.tier > 0);
+  if (singleSource.length) {
+    lines.push(`Single-source nodes (one supplier only): ${singleSource.map(n => n.name).join(', ')}`);
+  }
+
+  // ── SECTION 2: TIER BREAKDOWN ───────────────────────────
+  sec('Section 2 — Tier-by-Tier Node Breakdown');
+
+  TIERS.forEach((tier, i) => {
+    const tierNodes = state.nodes.filter(n => n.tier === i);
+    if (!tierNodes.length) return;
+
+    lines.push(``, `── ${tier.label.toUpperCase()} (${tierNodes.length} node${tierNodes.length !== 1 ? 's' : ''}) ──`);
+
+    tierNodes.forEach(n => {
+      lines.push(``, `  Node: ${n.name}`);
+      if (n.location)   lines.push(`    Location:  ${n.location}`);
+      if (n.contact)    lines.push(`    Contact:   ${n.contact}`);
+      if (n.lead_time)  lines.push(`    Lead time: ${n.lead_time}`);
+      if (n.risk)       lines.push(`    Risk:      ${n.risk.toUpperCase()}`);
+      if (n.cost)       lines.push(`    Cost:      ${n.cost}`);
+      if (n.certs && n.certs.length)  lines.push(`    Certs:     ${n.certs.join(', ')}`);
+      if (n.tags && n.tags.length)    lines.push(`    Tags:      ${n.tags.join(', ')}`);
+      if (n.notes)      lines.push(`    Notes:     ${n.notes}`);
+
+      // Operations
+      const ops = n.operations || [];
+      if (ops.length) {
+        lines.push(`    Operations (${ops.length}):`);
+        ops.forEach(o => {
+          lines.push(`      • ${o.name}${o.type ? ` [${o.type}]` : ''} — Status: ${(o.status || 'active').toUpperCase()}`);
+          if (o.contact) lines.push(`        Contact: ${o.contact}`);
+          if (o.cost)    lines.push(`        Cost: ${o.cost}`);
+          if (o.notes)   lines.push(`        Notes: ${o.notes}`);
+        });
+      }
+    });
+  });
+
+  // Nodes with unrecognised tier (beyond current TIERS)
+  const orphaned = state.nodes.filter(n => n.tier >= TIERS.length);
+  if (orphaned.length) {
+    lines.push(``, `── UNASSIGNED TIER (${orphaned.length} node${orphaned.length !== 1 ? 's' : ''}) ──`);
+    orphaned.forEach(n => lines.push(`  • ${n.name} (tier index: ${n.tier})`));
+  }
+
+  // ── SECTION 3: CONNECTION MAP ───────────────────────────
+  sec('Section 3 — Connection Map');
+  lines.push(`Format: SOURCE NODE  →  TARGET NODE  [via operation, if assigned]`, ``);
+
+  if (!resolvedLinks.length) {
+    lines.push(`  No links defined.`);
+  } else {
+    resolvedLinks.forEach(l => {
+      const srcNode = nodeMap[l.src];
+      const tgtNode = nodeMap[l.tgt];
+      if (!srcNode || !tgtNode) return;
+      const srcName = srcNode.name;
+      const tgtName = tgtNode.name;
+
+      let opLabel = '';
+      if (l.op_id) {
+        const op = (srcNode.operations || []).find(o => o.id === l.op_id);
+        if (op) opLabel = `  [via: ${op.name}${op.status !== 'active' ? ` — ${op.status.toUpperCase()}` : ''}]`;
+      }
+      lines.push(`  ${srcName}  →  ${tgtName}${opLabel}`);
+    });
+  }
+
+  // ── SECTION 4: RISK & FLAG SUMMARY ─────────────────────
+  sec('Section 4 — Risk & Flag Summary');
+
+  if (highRisk.length === 0 && medRisk.length === 0 && opsAtRisk.length === 0) {
+    lines.push(`  No high or medium risk flags detected.`);
+  }
+
+  if (highRisk.length) {
+    lines.push(``, `HIGH RISK NODES:`);
+    highRisk.forEach(n => {
+      lines.push(`  • ${n.name} (${n.location || 'location unknown'})`);
+      if (n.notes) lines.push(`    Notes: ${n.notes}`);
+    });
+  }
+
+  if (medRisk.length) {
+    lines.push(``, `MEDIUM RISK NODES:`);
+    medRisk.forEach(n => {
+      lines.push(`  • ${n.name} (${n.location || 'location unknown'})`);
+      if (n.notes) lines.push(`    Notes: ${n.notes}`);
+    });
+  }
+
+  if (opsAtRisk.length) {
+    lines.push(``, `NODES WITH DEGRADED OR OFFLINE OPERATIONS:`);
+    opsAtRisk.forEach(n => {
+      const flagged = (n.operations || []).filter(o => o.status === 'offline' || o.status === 'degraded');
+      flagged.forEach(o => {
+        lines.push(`  • ${n.name} — "${o.name}" is ${o.status.toUpperCase()}`);
+        if (o.notes) lines.push(`    Notes: ${o.notes}`);
+      });
+    });
+  }
+
+  // Geographic concentration
+  const countryCounts = {};
+  state.nodes.forEach(n => { if (n.country) countryCounts[n.country] = (countryCounts[n.country] || 0) + 1; });
+  const concentrated = Object.entries(countryCounts).filter(([, c]) => c >= 3).sort((a, b) => b[1] - a[1]);
+  if (concentrated.length) {
+    lines.push(``, `GEOGRAPHIC CONCENTRATION (3+ nodes in one country):`);
+    concentrated.forEach(([country, count]) => lines.push(`  • ${country}: ${count} nodes`));
+  }
+
+  // Tag coverage
+  if (allTags.length) {
+    lines.push(``, `TAG / PROGRAM COVERAGE:`);
+    allTags.forEach(tag => {
+      const tagged = state.nodes.filter(n => (n.tags || []).includes(tag));
+      const tiersCovered = [...new Set(tagged.map(n => (TIERS[n.tier] || TIERS[TIERS.length-1]).label))];
+      lines.push(`  • ${tag}: ${tagged.length} nodes across ${tiersCovered.join(', ')}`);
+    });
+  }
+
+  // ── SECTION 5: SUGGESTED PROMPT ────────────────────────
+  sec('Section 5 — Suggested AI Prompt');
+  lines.push(
+    `Copy and paste the following prompt along with this document into your AI assistant:`,
+    ``,
+    `─────────────────────────────────────────────────────────`,
+    `You are a supply chain risk analyst. The document above contains a complete`,
+    `structured export of a supply chain map for "${projectName}".`,
+    ``,
+    `Please analyse this supply chain and provide:`,
+    ``,
+    `1. CONCENTRATION RISK — Identify any geographic, supplier, or tier`,
+    `   concentrations that create systemic exposure.`,
+    ``,
+    `2. SINGLE POINTS OF FAILURE — Which nodes, if disrupted, would halt`,
+    `   the entire chain or a significant program? Are there nodes with no`,
+    `   redundant upstream supplier?`,
+    ``,
+    `3. BOTTLENECKS — Which nodes have the highest number of dependencies?`,
+    `   What is the downstream impact if they fail?`,
+    ``,
+    `4. OPERATIONS RISK — Review any degraded or offline operations and`,
+    `   assess their downstream impact on linked nodes.`,
+    ``,
+    `5. RESILIENCE GAPS — Where are the most critical gaps in redundancy,`,
+    `   and what specific actions would you recommend to address them?`,
+    ``,
+    `6. EXECUTIVE SUMMARY — Provide a 3–5 sentence brief suitable for`,
+    `   a COO or board presentation.`,
+    `─────────────────────────────────────────────────────────`
+  );
+
+  // ── WRITE FILE ──────────────────────────────────────────
+  const text = lines.join('\n');
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = (projectName.replace(/\s+/g, '-') || 'supply-chain') + '-AI-brief.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('AI analysis brief exported');
+}
+
+// ═══════════════════════════════════════════════
+//  FILTER — TAGS + TIERS (DROPDOWN)
+// ═══════════════════════════════════════════════
+
+let activeTagFilters  = new Set();
+let activeTierFilters = new Set();
+
+function toggleFilterDropdown(e) {
+  e.stopPropagation();
+  const dd   = document.getElementById('filter-dropdown');
+  const btn  = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  dd.style.top  = (rect.bottom + 6) + 'px';
+  dd.style.left = rect.left + 'px';
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+function toggleGeoFilterDropdown(e) {
+  e.stopPropagation();
+  const dd   = document.getElementById('geo-filter-dropdown');
+  const btn  = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  dd.style.top  = (rect.bottom + 6) + 'px';
+  dd.style.left = rect.left + 'px';
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+// Single consolidated document click handler — closes all dropdowns
+document.addEventListener('click', (e) => {
+  // Export menu
+  if (!e.target.closest('.export-wrap')) {
+    document.getElementById('export-menu')?.classList.remove('open');
+  }
+  // Flow filter dropdown
+  const d1 = document.getElementById('filter-dropdown');
+  if (d1 && !d1.contains(e.target) && !e.target.closest('#filter-bar')) d1.style.display = 'none';
+  // Geo filter dropdown
+  const d2 = document.getElementById('geo-filter-dropdown');
+  if (d2 && !d2.contains(e.target) && !e.target.closest('#geo-filter-panel')) d2.style.display = 'none';
+});
+
+function rebuildFilterBar() {
+  const allTags  = new Set();
+  state.nodes.forEach(n => (n.tags || []).forEach(t => allTags.add(t)));
+  const tagList  = [...allTags].sort();
+  const hasTags  = tagList.length > 0;
+  const hasNodes = state.nodes.length > 0;
+
+  // Helper: build a filter row item (checkbox + optional colour dot + label)
+  function rowHTML(id, label, checked, color) {
+    const dot = color ? `<span class="filter-row-dot" style="background:${color}"></span>` : '';
+    return `<label class="filter-row-item ${checked ? 'active' : ''}">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="handleFilterChange('${id}', this.checked)"/>
+      ${dot}<span>${label}</span>
+    </label>`;
+  }
+
+  // Shared tier rows HTML
+  const tierRows = TIERS.map((t, i) =>
+    rowHTML('tier:' + i, t.label, activeTierFilters.has(i), t.color)
+  ).join('');
+
+  // Shared tag rows HTML
+  const tagRows = hasTags
+    ? tagList.map(tag => rowHTML('tag:' + tag, tag, activeTagFilters.has(tag), null)).join('')
+    : `<div style="font-size:11px;color:var(--muted);padding:4px 8px;">No tags defined</div>`;
+
+  // ── Flow view dropdown ──
+  const bar = document.getElementById('filter-bar');
+  bar.style.display = hasNodes ? 'block' : 'none';
+  document.getElementById('filter-tier-options').innerHTML = tierRows;
+  document.getElementById('filter-tag-options').innerHTML  = tagRows;
+  document.getElementById('filter-tag-section-label').style.display = 'block';
+
+  // Update button label
+  const count = activeTagFilters.size + activeTierFilters.size;
+  document.getElementById('filter-bar-label').textContent =
+    count > 0 ? `Filter (${count})` : 'Filter';
+  document.getElementById('filter-bar-label').style.color =
+    count > 0 ? 'var(--accent)' : '';
+
+  // ── Geo view dropdown ──
+  const geoPanel = document.getElementById('geo-filter-panel');
+  geoPanel.style.display = hasNodes ? 'block' : 'none';
+  document.getElementById('geo-filter-tier-options').innerHTML = tierRows;
+  document.getElementById('geo-filter-tag-options').innerHTML  = tagRows;
+
+  const geoLabel = document.getElementById('geo-filter-label');
+  geoLabel.textContent = count > 0 ? `Filter (${count})` : 'Filter';
+}
+
+function handleFilterChange(id, checked) {
+  if (id.startsWith('tier:')) {
+    const tier = parseInt(id.split(':')[1]);
+    checked ? activeTierFilters.add(tier) : activeTierFilters.delete(tier);
+  } else if (id.startsWith('tag:')) {
+    const tag = id.slice(4);
+    checked ? activeTagFilters.add(tag) : activeTagFilters.delete(tag);
+  }
+  applyAllFilters();
+  rebuildFilterBar();
+}
+
+function clearAllFilters() {
+  activeTagFilters.clear();
+  activeTierFilters.clear();
+  applyAllFilters();
+  rebuildFilterBar();
+  // Close both dropdowns
+  document.getElementById('filter-dropdown').style.display = 'none';
+  const gd = document.getElementById('geo-filter-dropdown');
+  if (gd) gd.style.display = 'none';
+}
+
+// Keep old name as alias so existing callers don't break
+function clearTagFilter() { clearAllFilters(); }
+
+function nodeMatchesFilters(node) {
+  const tierOk = activeTierFilters.size === 0 || activeTierFilters.has(node.tier);
+  const tagOk  = activeTagFilters.size  === 0 ||
+    [...activeTagFilters].every(ft => (node.tags || []).includes(ft));
+  return tierOk && tagOk;
+}
+
+function applyAllFilters() {
+  const noFilter = activeTagFilters.size === 0 && activeTierFilters.size === 0;
+
+  // ── Flow view ──
+  if (currentView === 'graph') {
+    if (noFilter) {
+      d3.selectAll('.node-group').classed('dimmed', false).classed('highlighted', false);
+    } else {
+      d3.selectAll('.node-group').each(function(d) {
+        d3.select(this).classed('dimmed', !nodeMatchesFilters(d)).classed('highlighted', false);
+      });
+    }
+  }
+
+  // ── Geo view: markers + link visibility ──
+  if (currentView === 'geo') {
+    // Build set of visible node IDs
+    const visibleIds = new Set(
+      state.nodes.filter(n => noFilter || nodeMatchesFilters(n)).map(n => n.id)
+    );
+
+    geoMarkers.forEach(marker => {
+      const matches = visibleIds.has(marker._nodeId);
+      marker.setStyle({ fillOpacity: matches ? 0.9 : 0.1, opacity: matches ? 1 : 0.15 });
+    });
+
+    updateLinkVisibility(visibleIds);
+  }
+}
+
+function updateLinkVisibility(visibleIds) {
+  geoLinks.forEach(({ line, srcId, tgtId }) => {
+    // Show link only if arrows are on AND at least one endpoint is visible
+    const endpointVisible = (visibleIds ? (visibleIds.has(srcId) || visibleIds.has(tgtId)) : true);
+    const show = geoArrowsVisible && endpointVisible;
+    const el = line.getElement();
+    if (el) el.style.opacity = show ? '' : '0';
+    // Also toggle pointer-events so hidden lines don't interfere
+    if (el) el.style.pointerEvents = show ? '' : 'none';
+  });
+}
+
+function toggleGeoArrows() {
+  geoArrowsVisible = !geoArrowsVisible;
+  const btn = document.getElementById('geo-arrows-btn');
+  btn.style.color       = geoArrowsVisible ? '' : 'var(--accent)';
+  btn.style.borderColor = geoArrowsVisible ? '' : 'var(--accent)';
+  // Update the text label span inside the button
+  const labelSpan = btn.querySelector('.geo-arrows-label');
+  if (labelSpan) labelSpan.textContent = `Arrows: ${geoArrowsVisible ? 'On' : 'Off'}`;
+
+  const noFilter = activeTagFilters.size === 0 && activeTierFilters.size === 0;
+  const visibleIds = new Set(
+    state.nodes.filter(n => noFilter || nodeMatchesFilters(n)).map(n => n.id)
+  );
+  updateLinkVisibility(visibleIds);
+}
+
+// Legacy alias so existing setTimeout calls still work
+function applyTagFilter() { applyAllFilters(); }
+function toggleTagFilter(tag) {
+  activeTagFilters.has(tag) ? activeTagFilters.delete(tag) : activeTagFilters.add(tag);
+  applyAllFilters(); rebuildFilterBar();
+}
+
+// ═══════════════════════════════════════════════
+//  TIER CONFIGURATION
+// ═══════════════════════════════════════════════
+
+const TIER_PALETTE = [
+  '#4f8ef7', '#7c5cfc', '#26c0a0', '#f59e0b',
+  '#ef4444', '#ec4899', '#10b981', '#f97316',
+  '#06b6d4', '#8b5cf6', '#84cc16', '#e11d48',
+];
+
+const MAX_TIERS = 8;
+
+// Working copy used while the modal is open — only committed on Apply
+let tierDraft = [];
+// Which tier row is showing the colour picker (-1 = none)
+let colourPickerOpen = -1;
+
+function openTierConfig() {
+  tierDraft = TIERS.map(t => ({ ...t }));
+  colourPickerOpen = -1;
+  renderTierModal();
+  showOnlyModal('tier-modal');
+}
+
+function closeTierModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+function renderTierModal() {
+  const body = document.getElementById('tier-modal-body');
+  const addBtn = document.getElementById('tier-add-btn');
+  addBtn.disabled = tierDraft.length >= MAX_TIERS;
+  addBtn.style.opacity = tierDraft.length >= MAX_TIERS ? '0.4' : '1';
+
+  body.innerHTML = `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">
+      Each tier represents a stage in your supply chain. Names appear on nodes and in the legend.
+      Max ${MAX_TIERS} tiers. Click a colour dot to change it.
+    </p>
+    ${tierDraft.map((t, i) => `
+      <div class="tier-config-row" id="tier-row-${i}">
+        <div class="tier-swatch" style="background:${t.color}" title="Change colour" onclick="toggleColourPicker(${i})"></div>
+        <input class="tier-name-input" value="${escHtml(t.label)}" maxlength="30"
+               oninput="tierDraft[${i}].label = this.value" placeholder="Tier name"/>
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          <button class="tier-move-btn" onclick="moveTier(${i},-1)" ${i===0?'disabled':''} title="Move up">▲</button>
+          <button class="tier-move-btn" onclick="moveTier(${i},1)"  ${i===tierDraft.length-1?'disabled':''} title="Move down">▼</button>
+        </div>
+        <button class="tier-del-btn" onclick="deleteTier(${i})" ${tierDraft.length<=1?'disabled':''} title="Remove tier">×</button>
+      </div>
+      ${colourPickerOpen === i ? `
+        <div class="colour-picker-row" style="padding-left:36px;margin-top:-6px;margin-bottom:4px;">
+          ${TIER_PALETTE.map(c => `
+            <div class="colour-option ${t.color===c?'selected':''}"
+                 style="background:${c}"
+                 title="${c}"
+                 onclick="pickColour(${i},'${c}')"></div>
+          `).join('')}
+        </div>` : ''}
+    `).join('')}`;
+}
+
+function toggleColourPicker(i) {
+  colourPickerOpen = colourPickerOpen === i ? -1 : i;
+  renderTierModal();
+}
+
+function pickColour(i, colour) {
+  tierDraft[i].color = colour;
+  colourPickerOpen = -1;
+  renderTierModal();
+}
+
+function moveTier(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= tierDraft.length) return;
+
+  // Swap tiers
+  [tierDraft[i], tierDraft[j]] = [tierDraft[j], tierDraft[i]];
+
+  // Re-map all node tier indices to follow the swap
+  state.nodes.forEach(n => {
+    if (n.tier === i) n.tier = j;
+    else if (n.tier === j) n.tier = i;
+  });
+
+  colourPickerOpen = -1;
+  renderTierModal();
+}
+
+function deleteTier(i) {
+  if (tierDraft.length <= 1) return;
+
+  // Nodes that were on the deleted tier fall back to the last remaining tier
+  const lastIdx = tierDraft.length - 2; // after deletion
+  state.nodes.forEach(n => {
+    if (n.tier === i) n.tier = lastIdx;
+    else if (n.tier > i) n.tier -= 1;
+  });
+
+  tierDraft.splice(i, 1);
+  colourPickerOpen = -1;
+  renderTierModal();
+}
+
+function addTier() {
+  if (tierDraft.length >= MAX_TIERS) return;
+  // Pick a colour not already in use
+  const used = new Set(tierDraft.map(t => t.color));
+  const next = TIER_PALETTE.find(c => !used.has(c)) || TIER_PALETTE[tierDraft.length % TIER_PALETTE.length];
+  tierDraft.push({ label: 'New Tier', color: next });
+  colourPickerOpen = -1;
+  renderTierModal();
+}
+
+function saveTierConfig() {
+  // Validate — no blank names
+  if (tierDraft.some(t => !t.label.trim())) {
+    toast('All tiers must have a name');
+    return;
+  }
+  TIERS = tierDraft.map(t => ({ label: t.label.trim(), color: t.color }));
+  closeTierModal();
+  renderGraph();
+  renderLegends();
+  rebuildFilterBar();
+  toast('Tier configuration saved');
+}
+
+function renderLegends() {
+  const flowRows = document.getElementById('legend-rows');
+  const geoRows  = document.getElementById('geo-legend-rows');
+
+  // Count nodes per tier
+  const counts = {};
+  state.nodes.forEach(n => { counts[n.tier] = (counts[n.tier] || 0) + 1; });
+
+  const html = TIERS.map((t, i) => {
+    const count = counts[i] || 0;
+    const countStr = count > 0
+      ? `<span style="margin-left:auto;font-size:10px;color:var(--border2);font-family:'DM Mono',monospace;">${count}</span>`
+      : '';
+    return `<div class="leg-row" style="justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="leg-dot" style="background:${t.color}"></div>
+        ${escHtml(t.label)}
+      </div>
+      ${countStr}
+    </div>`;
+  }).join('');
+
+  if (flowRows) flowRows.innerHTML = html;
+  if (geoRows)  geoRows.innerHTML  = html;
+}
+
+// ═══════════════════════════════════════════════
+//  OPERATIONS
+// ═══════════════════════════════════════════════
+
+const OP_STATUSES = [
+  { value: 'active',   label: 'Active',   color: '#26c0a0' },
+  { value: 'degraded', label: 'Degraded', color: '#f59e0b' },
+  { value: 'offline',  label: 'Offline',  color: '#ef4444' },
+  { value: 'planned',  label: 'Planned',  color: '#7a85a0' },
+];
+
+function opStatusColor(s) {
+  return (OP_STATUSES.find(x => x.value === s) || OP_STATUSES[0]).color;
+}
+
+function renderOpsTab(nodeId, editingOpId = null) {
+  const node = state.nodes.find(n => n.id === nodeId);
+  if (!node) return '';
+  const ops = node.operations || [];
+
+  const statusOptions = OP_STATUSES.map(s =>
+    `<option value="${s.value}">${s.label}</option>`
+  ).join('');
+
+  const addForm = `
+    <div class="op-form" id="op-add-form">
+      <div class="form-group">
+        <label class="form-label">Name *</label>
+        <input class="form-input" id="op-f-name" placeholder="e.g. Production Line A"/>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <input class="form-input" id="op-f-type" placeholder="e.g. Assembly Line"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="op-f-status">${statusOptions}</select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Contact</label>
+          <input class="form-input" id="op-f-contact" placeholder="Name or email"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Cost</label>
+          <input class="form-input" id="op-f-cost" placeholder="e.g. $800/unit"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="op-f-notes" style="min-height:52px"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn btn-ghost" style="flex:0 0 auto;padding:6px 12px;font-size:12px"
+                onclick="renderOpsTabInPlace('${nodeId}')">Cancel</button>
+        <button class="btn btn-primary" style="flex:1;font-size:12px"
+                onclick="saveNewOperation('${nodeId}')">Add operation</button>
+      </div>
+    </div>`;
+
+  const opCards = ops.map(op => {
+    const isEditing = op.id === editingOpId;
+    const color = opStatusColor(op.status);
+    const statusClass = `status-${op.status || 'active'}`;
+
+    if (isEditing) {
+      const editOpts = OP_STATUSES.map(s =>
+        `<option value="${s.value}" ${op.status === s.value ? 'selected' : ''}>${s.label}</option>`
+      ).join('');
+      return `
+        <div class="op-form">
+          <div class="form-group">
+            <label class="form-label">Name *</label>
+            <input class="form-input" id="op-e-name" value="${escHtml(op.name||'')}"/>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Type</label>
+              <input class="form-input" id="op-e-type" value="${escHtml(op.type||'')}"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <select class="form-select" id="op-e-status">${editOpts}</select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Contact</label>
+              <input class="form-input" id="op-e-contact" value="${escHtml(op.contact||'')}"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cost</label>
+              <input class="form-input" id="op-e-cost" value="${escHtml(op.cost||'')}"/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <textarea class="form-textarea" id="op-e-notes" style="min-height:52px">${escHtml(op.notes||'')}</textarea>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            <button class="btn btn-ghost" style="flex:0 0 auto;padding:6px 12px;font-size:12px"
+                    onclick="renderOpsTabInPlace('${nodeId}')">Cancel</button>
+            <button class="btn btn-primary" style="flex:1;font-size:12px"
+                    onclick="saveEditOperation('${nodeId}','${op.id}')">Save</button>
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="op-card">
+        <div class="op-card-header">
+          <div class="op-status-dot" style="background:${color}"></div>
+          <span class="op-name">${escHtml(op.name)}</span>
+          <span class="status-badge ${statusClass}">${op.status||'active'}</span>
+        </div>
+        ${op.type    ? `<div class="op-type">${escHtml(op.type)}</div>` : ''}
+        ${op.contact ? `<div class="op-detail-row"><span class="op-detail-key">Contact</span><span>${escHtml(op.contact)}</span></div>` : ''}
+        ${op.cost    ? `<div class="op-detail-row"><span class="op-detail-key">Cost</span><span>${escHtml(op.cost)}</span></div>` : ''}
+        ${op.notes   ? `<div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.5">${escHtml(op.notes)}</div>` : ''}
+        <div class="op-actions">
+          <button class="op-btn" onclick="editOperation('${nodeId}','${op.id}')">Edit</button>
+          <button class="op-btn danger" onclick="deleteOperation('${nodeId}','${op.id}')">Remove</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  const showingAddForm = editingOpId === '__new__';
+
+  return `
+    <div style="padding-bottom:4px;">
+      ${opCards}
+      ${showingAddForm ? addForm : `
+        <button class="btn btn-ghost" style="width:100%;margin-top:4px;font-size:12px"
+                onclick="showAddOpForm('${nodeId}')">+ Add operation</button>`}
+    </div>`;
+}
+
+function renderOpsTabInPlace(nodeId) {
+  const panel = document.getElementById('tab-panel');
+  if (panel) panel.innerHTML = renderOpsTab(nodeId);
+}
+
+function showAddOpForm(nodeId) {
+  const panel = document.getElementById('tab-panel');
+  if (panel) panel.innerHTML = renderOpsTab(nodeId, '__new__');
+  document.getElementById('op-f-name')?.focus();
+}
+
+function saveNewOperation(nodeId) {
+  const name = document.getElementById('op-f-name')?.value.trim();
+  if (!name) { toast('Operation name is required'); return; }
+  const node = state.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  if (!node.operations) node.operations = [];
+  node.operations.push({
+    id:      uid(),
+    name,
+    type:    document.getElementById('op-f-type')?.value.trim()    || '',
+    status:  document.getElementById('op-f-status')?.value         || 'active',
+    contact: document.getElementById('op-f-contact')?.value.trim() || '',
+    cost:    document.getElementById('op-f-cost')?.value.trim()    || '',
+    notes:   document.getElementById('op-f-notes')?.value.trim()   || '',
+  });
+  renderGraph();
+  // Refresh sidebar staying on ops tab
+  showSidebar('detail', nodeId);
+  switchTab('ops', nodeId);
+  toast('Operation added');
+}
+
+function editOperation(nodeId, opId) {
+  const panel = document.getElementById('tab-panel');
+  if (panel) panel.innerHTML = renderOpsTab(nodeId, opId);
+}
+
+function saveEditOperation(nodeId, opId) {
+  const name = document.getElementById('op-e-name')?.value.trim();
+  if (!name) { toast('Operation name is required'); return; }
+  const node = state.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const op = (node.operations || []).find(o => o.id === opId);
+  if (!op) return;
+  op.name    = name;
+  op.type    = document.getElementById('op-e-type')?.value.trim()    || '';
+  op.status  = document.getElementById('op-e-status')?.value         || 'active';
+  op.contact = document.getElementById('op-e-contact')?.value.trim() || '';
+  op.cost    = document.getElementById('op-e-cost')?.value.trim()    || '';
+  op.notes   = document.getElementById('op-e-notes')?.value.trim()   || '';
+  renderGraph();
+  showSidebar('detail', nodeId);
+  switchTab('ops', nodeId);
+  toast('Operation updated');
+}
+
+function deleteOperation(nodeId, opId) {
+  const node = state.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  node.operations = (node.operations || []).filter(o => o.id !== opId);
+  renderGraph();
+  showSidebar('detail', nodeId);
+  switchTab('ops', nodeId);
+  toast('Operation removed');
+}
+
+// ═══════════════════════════════════════════════
+//  STATS
+// ═══════════════════════════════════════════════
+
+function updateStats() {
+  document.getElementById('stat-nodes').textContent = state.nodes.length;
+  document.getElementById('stat-links').textContent = state.links.length;
+  const tiers = new Set(state.nodes.map(n => n.tier)).size;
+  document.getElementById('stat-tiers').textContent = tiers;
+  renderLegends();
+  rebuildFilterBar();
+}
+
+// ═══════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// ═══════════════════════════════════════════════
+//  VIEW TOGGLE
+// ═══════════════════════════════════════════════
+
+let currentView = 'graph';
+
+function setView(v) {
+  if (v === currentView) return;
+  currentView = v;
+  document.getElementById('vbtn-graph').classList.toggle('active', v === 'graph');
+  document.getElementById('vbtn-geo').classList.toggle('active', v === 'geo');
+
+  const geoScreen = document.getElementById('geo-screen');
+  const main      = document.getElementById('main');
+
+  if (v === 'geo') {
+    main.style.display = 'none';
+    geoScreen.classList.add('visible');
+    initGeoView();
+  } else {
+    main.style.display = '';
+    geoScreen.classList.remove('visible');
+    if (simulation) simulation.alpha(0.1).restart();
+    // Re-apply flow filters after a tick so D3 nodes exist
+    setTimeout(() => { rebuildFilterBar(); applyTagFilter(); }, 80);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  GEOGRAPHIC VIEW
+// ═══════════════════════════════════════════════
+
+let leafletMap   = null;
+let geoMarkers   = [];
+let geoPolylines = [];
+let geoLinks     = [];   // {line, srcId, tgtId}
+let geoArrowsVisible = true;
+let geocodeCache = {};
+
+const UNRESOLVABLE = ['global','various','worldwide','multiple','n/a','—',''];
+
+function isUnresolvable(loc) {
+  return UNRESOLVABLE.includes((loc || '').toLowerCase().trim());
+}
+
+async function initGeoView() {
+  if (!leafletMap) {
+    leafletMap = L.map('geo-map', { center: [25, 10], zoom: 2 });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+      maxZoom: 18,
+    }).addTo(leafletMap);
+  }
+
+  geoMarkers.forEach(m => m.remove());
+  geoPolylines.forEach(p => p.remove());
+  geoMarkers = []; geoPolylines = []; geoLinks = [];
+
+  const toResolve  = state.nodes.filter(n => !isUnresolvable(n.location));
+  const unresolved = state.nodes.filter(n =>  isUnresolvable(n.location));
+
+  renderUnresolvedPanel(unresolved);
+
+  const loadingEl  = document.getElementById('geo-loading');
+  const loadingMsg = document.getElementById('geo-loading-msg');
+  loadingEl.classList.remove('hidden');
+  loadingMsg.textContent = `Locating ${toResolve.length} node${toResolve.length !== 1 ? 's' : ''}…`;
+
+  const nodeCoords = {};
+  let done = 0;
+  for (const node of toResolve) {
+    const key = (node.location || '').trim().toLowerCase();
+    if (!geocodeCache[key]) {
+      geocodeCache[key] = await geocode(node.location);
+      await sleep(1100);
+    }
+    if (geocodeCache[key]) nodeCoords[node.id] = geocodeCache[key];
+    done++;
+    loadingMsg.textContent = `Locating nodes… (${done} / ${toResolve.length})`;
+  }
+
+  loadingEl.classList.add('hidden');
+
+  // Place markers — radius 14 so they're visible at world zoom
+  toResolve.forEach(node => {
+    const coords = nodeCoords[node.id];
+    if (!coords) return;
+    const color  = tierColor(node.tier);
+    const riskColor = node.risk === 'high' ? '#ef4444' : node.risk === 'medium' ? '#f59e0b' : '#26c0a0';
+    const riskBg    = node.risk === 'high' ? 'rgba(239,68,68,.15)' : node.risk === 'medium' ? 'rgba(245,158,11,.15)' : 'rgba(38,192,160,.15)';
+
+    const marker = L.circleMarker([coords.lat, coords.lng], {
+      radius: 14, fillColor: color, fillOpacity: 0.9, color: '#ffffff', weight: 2,
+    });
+
+    marker.bindPopup(`
+      <div class="geo-popup-name">${escHtml(node.name)}</div>
+      <div class="geo-popup-tier" style="color:${color}">${(TIERS[node.tier] || TIERS[TIERS.length-1]).label}</div>
+      ${node.location  ? `<div class="geo-popup-row"><span class="geo-popup-key">Location</span><span>${escHtml(node.location)}</span></div>` : ''}
+      ${node.contact   ? `<div class="geo-popup-row"><span class="geo-popup-key">Contact</span><span>${escHtml(node.contact)}</span></div>` : ''}
+      ${node.lead_time ? `<div class="geo-popup-row"><span class="geo-popup-key">Lead time</span><span>${escHtml(node.lead_time)}</span></div>` : ''}
+      ${node.risk      ? `<div class="geo-popup-row"><span class="geo-popup-key">Risk</span><span style="padding:1px 7px;border-radius:3px;background:${riskBg};color:${riskColor};font-size:11px">${node.risk}</span></div>` : ''}
+      ${node.cost      ? `<div class="geo-popup-row"><span class="geo-popup-key">Cost</span><span>${escHtml(node.cost)}</span></div>` : ''}
+      <button class="geo-popup-btn" onclick="setView('graph');selectNode('${node.id}')">View in flow →</button>
+    `, { maxWidth: 240 });
+
+    marker.addTo(leafletMap);
+    marker._nodeId = node.id;
+    geoMarkers.push(marker);
+  });
+
+  // Connection lines — store {line, srcId, tgtId} for filter control
+  geoLinks = [];
+  state.links.forEach(l => {
+    const srcId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
+    const a = nodeCoords[srcId], b = nodeCoords[tgtId];
+    if (!a || !b) return;
+
+    const line = L.polyline([[a.lat, a.lng],[b.lat, b.lng]], {
+      color: '#4f8ef7', weight: 2.5, opacity: 0.7,
+    }).addTo(leafletMap);
+
+    // Apply arrowhead via the SVG element's style after adding to map
+    const pathEl = line.getElement();
+    if (pathEl) pathEl.setAttribute('marker-end', 'url(#geo-arrowhead)');
+
+    geoPolylines.push(line);
+    geoLinks.push({ line, srcId, tgtId });
+  });
+
+  // Fit bounds then invalidate so tiles render
+  const placed = Object.values(nodeCoords);
+  setTimeout(() => {
+    leafletMap.invalidateSize();
+    if (placed.length > 0) {
+      leafletMap.fitBounds(
+        L.latLngBounds(placed.map(c => [c.lat, c.lng])),
+        { padding: [48, 48] }
+      );
+    }
+
+    // Inject shared SVG arrowhead def into Leaflet's overlay SVG
+    const overlayPane = leafletMap.getPane('overlayPane');
+    const mapSvgEl = overlayPane ? overlayPane.querySelector('svg') : null;
+    if (mapSvgEl && !document.getElementById('geo-arrowhead')) {
+      const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+      defs.innerHTML = `<marker id="geo-arrowhead" markerWidth="7" markerHeight="7"
+        refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0.5 L0,6.5 L6,3.5 z" fill="#4f8ef7"/>
+      </marker>`;
+      mapSvgEl.insertBefore(defs, mapSvgEl.firstChild);
+    }
+
+    // Apply arrowhead to each line's SVG path element
+    geoLinks.forEach(({ line }) => {
+      const el = line.getElement();
+      if (el) el.setAttribute('marker-end', 'url(#geo-arrowhead)');
+    });
+
+    // Apply any existing filters
+    rebuildFilterBar();
+    applyAllFilters();
+  }, 150);
+}
+
+function renderUnresolvedPanel(nodes) {
+  const panel = document.getElementById('geo-unresolved');
+  const chips = document.getElementById('geo-unresolved-chips');
+  if (!nodes.length) { panel.style.display = 'none'; return; }
+  chips.innerHTML = nodes.map(n => `
+    <div class="unresolved-chip" onclick="setView('graph');selectNode('${n.id}')" title="View in flow">
+      <div class="unresolved-chip-dot" style="background:${tierColor(n.tier)}"></div>
+      <span>${escHtml(n.name)}</span>
+      <span style="opacity:.5;font-size:10px">${escHtml(n.location || 'no location')}</span>
+    </div>`).join('');
+  panel.style.display = 'block';
+}
+
+async function geocode(location) {
+  if (!location) return null;
+  try {
+    const url  = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location.trim())}&format=json&limit=1`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (data && data.length > 0) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    return null;
+  } catch { return null; }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Collapse sidebar on canvas click
+document.getElementById('graph-svg').addEventListener('click', () => {
+  if (!linkModeActive && selectedNodeId) {
+    closeSidebar();
+  }
+});
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+
+window.addEventListener('load', () => {
+  initGraph();
+  loadSample();
+  renderLegends();
+});
+
+window.addEventListener('resize', () => {
+  renderGraph();
+});
+</script>
+</body>
+</html>
